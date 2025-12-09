@@ -1,6 +1,6 @@
 # AI対話振り返りメディテーションシステム
 
-**Version:** 2.2 (MVP Streamlit版)  
+**Version:** 2.2 (MVPStreamlit版)  
 **Last Updated:** 2025/12/05
 
 「言葉にできないモヤモヤ」を可視化し、就寝前のメンタルヘルスを整えるAIコーチングシステム。
