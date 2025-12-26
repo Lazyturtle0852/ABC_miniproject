@@ -4,8 +4,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from datetime import datetime
-import os
 from utils import init_session_state, get_openai_client
+from services.transcription import transcribe_video
+from services.ai_chat import generate_ai_response
 
 st.set_page_config(
     page_title="AI対話振り返りメディテーション MVP",
@@ -258,38 +259,37 @@ elif st.session_state["current_step"] == 2:
                         "録画データから音声を抽出して文字起こし中...", expanded=True
                     ) as status:
                         try:
-                            temp_video_file = "temp_recording.webm"
-                            with open(temp_video_file, "wb") as f:
-                                f.write(st.session_state["recorded_video_data"])
-
                             st.write("動画ファイルを読み込んでいます...")
                             st.write(
                                 "Whisper APIに送信中...（動画ファイルから音声を抽出）"
                             )
                             st.session_state["transcription_status"] = "processing"
 
-                            with open(temp_video_file, "rb") as f:
-                                response = client.audio.transcriptions.create(
-                                    model="whisper-1", file=f, language="ja"
-                                )
-
-                            st.session_state["transcription_result"] = response.text
-                            st.session_state["transcription_status"] = "completed"
-                            status.update(
-                                label="文字起こし完了！",
-                                state="complete",
-                                expanded=False,
+                            # バックエンドサービスを呼び出し
+                            transcription_text, transcription_status = transcribe_video(
+                                st.session_state["recorded_video_data"], client
                             )
 
-                            # 文字起こしが完了したら自動的に次のステップへ（ここで遷移）
-                            st.session_state["current_step"] = 3
+                            if transcription_status == "completed":
+                                st.session_state["transcription_result"] = (
+                                    transcription_text
+                                )
+                                st.session_state["transcription_status"] = "completed"
+                                status.update(
+                                    label="文字起こし完了！",
+                                    state="complete",
+                                    expanded=False,
+                                )
+                                # 文字起こしが完了したら自動的に次のステップへ（ここで遷移）
+                                st.session_state["current_step"] = 3
+                            else:
+                                st.session_state["transcription_status"] = "error"
+                                st.error("文字起こし処理中にエラーが発生しました")
+                                status.update(label="エラー発生", state="error")
                         except Exception as e:
                             st.session_state["transcription_status"] = "error"
                             st.error(f"エラー: {e}")
                             status.update(label="エラー発生", state="error")
-                        finally:
-                            if os.path.exists(temp_video_file):
-                                os.remove(temp_video_file)
 
                     # ステップ遷移後、rerun
                     if st.session_state["transcription_status"] == "completed":
@@ -441,42 +441,6 @@ elif st.session_state["current_step"] == 3:
     st.subheader("ステップ3: 💬 対話・結果")
     st.markdown("文字起こし結果とAI応答を確認できます。")
 
-    # プロンプト構築関数
-    def build_conversation_prompt(transcription_text, emotion_coords):
-        x, y = emotion_coords
-        if x > 0.5:
-            pleasure_desc = "非常に快"
-        elif x > 0:
-            pleasure_desc = "やや快"
-        elif x > -0.5:
-            pleasure_desc = "やや不快"
-        else:
-            pleasure_desc = "非常に不快"
-
-        if y > 0.5:
-            arousal_desc = "非常に覚醒"
-        elif y > 0:
-            arousal_desc = "やや覚醒"
-        elif y > -0.5:
-            arousal_desc = "やや落ち着き"
-        else:
-            arousal_desc = "非常に落ち着き"
-
-        system_prompt = """あなたはメンタルヘルスケアの専門家です。
-ユーザーの感情状態を理解し、共感的でサポート的な対話を行ってください。
-ユーザーの感情に寄り添いながら、適切なアドバイスや質問を提供してください。"""
-
-        user_prompt = f"""ユーザーが話した内容：
-「{transcription_text}」
-
-ユーザーの現在の感情状態：
-- 快/不快軸（X軸）: {x:.2f} ({pleasure_desc})
-- 覚醒/落ち着き軸（Y軸）: {y:.2f} ({arousal_desc})
-
-この感情状態と話した内容を踏まえて、適切な応答を生成してください。"""
-
-        return system_prompt, user_prompt
-
     # 文字起こし結果の表示
     if st.session_state["transcription_result"]:
         st.markdown("---")
@@ -492,39 +456,34 @@ elif st.session_state["current_step"] == 3:
             ):
                 with st.spinner("AI応答を自動生成中..."):
                     try:
-                        system_prompt, user_prompt = build_conversation_prompt(
+                        # バックエンドサービスを呼び出し
+                        ai_response, response_status = generate_ai_response(
                             st.session_state["transcription_result"],
                             st.session_state["emotion_coords"],
+                            face_emotion=None,  # 将来実装用
+                            client=client,
                         )
 
-                        response = client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                            temperature=0.7,
-                        )
+                        if response_status == "completed":
+                            st.session_state["ai_response"] = ai_response
 
-                        st.session_state["ai_response"] = response.choices[
-                            0
-                        ].message.content
+                            # 対話履歴に追加
+                            st.session_state["conversation_history"].append(
+                                {
+                                    "transcription": st.session_state[
+                                        "transcription_result"
+                                    ],
+                                    "emotion": st.session_state["emotion_coords"],
+                                    "ai_response": st.session_state["ai_response"],
+                                    "timestamp": datetime.now().isoformat(),
+                                }
+                            )
 
-                        # 対話履歴に追加
-                        st.session_state["conversation_history"].append(
-                            {
-                                "transcription": st.session_state[
-                                    "transcription_result"
-                                ],
-                                "emotion": st.session_state["emotion_coords"],
-                                "ai_response": st.session_state["ai_response"],
-                                "timestamp": datetime.now().isoformat(),
-                            }
-                        )
-
-                        st.rerun()
+                            st.rerun()
+                        else:
+                            st.error("AI応答生成に失敗しました")
                     except Exception as e:
-                        st.error(f"GPT API呼び出しエラー: {e}")
+                        st.error(f"AI応答生成エラー: {e}")
             elif (
                 client is not None
                 and "OPENAI_API_KEY" in st.secrets

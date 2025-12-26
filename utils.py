@@ -16,7 +16,7 @@ def init_session_state():
     if "recording_started_at" not in st.session_state:
         st.session_state["recording_started_at"] = None
 
-    # “収録データ”の格納先（MVPなので session_state に保持）
+    # "収録データ"の格納先（MVPなので session_state に保持）
     if "video_buffer" not in st.session_state:
         st.session_state["video_buffer"] = None  # bytes など想定（今はプレースホルダ可）
 
@@ -40,7 +40,7 @@ def init_session_state():
         st.session_state["transcription_result"] = None  # 文字起こし結果のテキスト
     if "transcription_status" not in st.session_state:
         st.session_state["transcription_status"] = "idle"  # 処理状態（"idle", "processing", "completed", "error")
-    
+
     # 対話関連
     if "conversation_history" not in st.session_state:
         st.session_state["conversation_history"] = []  # 対話履歴
@@ -54,5 +54,3 @@ def get_openai_client():
         return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     except (KeyError, AttributeError):
         return None
-
-
