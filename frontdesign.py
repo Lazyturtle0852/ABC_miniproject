@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 from utils import init_session_state, get_openai_client
 from services.transcription import transcribe_video
+from services.face_analysis import analyze_face_emotion
 from services.ai_chat import generate_ai_response
 
 st.set_page_config(
@@ -247,14 +248,17 @@ elif st.session_state["current_step"] == 2:
                     else:
                         st.session_state["audio_buffer"] = b""
 
-                st.success("収録を停止しました。文字起こし処理を開始します...")
+                st.success(
+                    "収録を停止しました。文字起こしと表情認識処理を開始します..."
+                )
 
-                # 録画データがある場合、文字起こし処理を自動実行
+                # 録画データがある場合、文字起こしと表情認識処理を自動実行
                 if (
                     st.session_state["recorded_video_data"] is not None
                     and client is not None
                     and "OPENAI_API_KEY" in st.secrets
                 ):
+                    # 文字起こし処理
                     with st.status(
                         "録画データから音声を抽出して文字起こし中...", expanded=True
                     ) as status:
@@ -280,19 +284,63 @@ elif st.session_state["current_step"] == 2:
                                     state="complete",
                                     expanded=False,
                                 )
-                                # 文字起こしが完了したら自動的に次のステップへ（ここで遷移）
-                                st.session_state["current_step"] = 3
                             else:
                                 st.session_state["transcription_status"] = "error"
                                 st.error("文字起こし処理中にエラーが発生しました")
                                 status.update(label="エラー発生", state="error")
                         except Exception as e:
                             st.session_state["transcription_status"] = "error"
-                            st.error(f"エラー: {e}")
+                            st.error(f"文字起こしエラー: {e}")
                             status.update(label="エラー発生", state="error")
 
-                    # ステップ遷移後、rerun
+                    # 表情認識処理
+                    with st.status(
+                        "録画データからフレームを抽出して表情認識中...", expanded=True
+                    ) as status_face:
+                        try:
+                            st.write(
+                                "動画ファイルから5秒ごとにフレームを抽出しています..."
+                            )
+                            st.write("GPT-4o Vision APIに送信中...")
+                            st.session_state["face_emotion_status"] = "processing"
+
+                            # バックエンドサービスを呼び出し
+                            face_emotion, face_status = analyze_face_emotion(
+                                st.session_state["recorded_video_data"], client
+                            )
+
+                            if face_status == "completed":
+                                st.session_state["face_emotion_result"] = face_emotion
+                                st.session_state["face_emotion_status"] = "completed"
+                                status_face.update(
+                                    label="表情認識完了！",
+                                    state="complete",
+                                    expanded=False,
+                                )
+                            else:
+                                st.session_state["face_emotion_status"] = "error"
+                                st.warning(
+                                    "表情認識処理中にエラーが発生しました（続行します）"
+                                )
+                                st.session_state["face_emotion_result"] = None
+                                status_face.update(
+                                    label="表情認識エラー（続行）",
+                                    state="error",
+                                    expanded=False,
+                                )
+                        except Exception as e:
+                            st.session_state["face_emotion_status"] = "error"
+                            st.warning(f"表情認識エラー: {e}（続行します）")
+                            st.session_state["face_emotion_result"] = None
+                            status_face.update(
+                                label="表情認識エラー（続行）",
+                                state="error",
+                                expanded=False,
+                            )
+
+                    # 文字起こしが完了したら自動的に次のステップへ（ここで遷移）
                     if st.session_state["transcription_status"] == "completed":
+                        st.session_state["current_step"] = 3
                         st.rerun()
                 else:
                     st.warning(
@@ -460,7 +508,7 @@ elif st.session_state["current_step"] == 3:
                         ai_response, response_status = generate_ai_response(
                             st.session_state["transcription_result"],
                             st.session_state["emotion_coords"],
-                            face_emotion=None,  # 将来実装用
+                            face_emotion=st.session_state.get("face_emotion_result"),
                             client=client,
                         )
 
@@ -520,5 +568,7 @@ elif st.session_state["current_step"] == 3:
         st.session_state["is_recording"] = False
         st.session_state["transcription_result"] = None
         st.session_state["transcription_status"] = "idle"
+        st.session_state["face_emotion_result"] = None
+        st.session_state["face_emotion_status"] = "idle"
         st.session_state["ai_response"] = None
         st.rerun()

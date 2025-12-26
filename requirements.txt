@@ -7,6 +7,9 @@ plotly>=5.17.0
 # AI・API
 openai>=1.3.0
 
+# 映像処理（表情認識のフレーム抽出用）
+opencv-python-headless>=4.8.0
+
 # その他
 python-dotenv>=1.0.0
 

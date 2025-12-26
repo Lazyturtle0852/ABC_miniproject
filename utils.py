@@ -41,6 +41,12 @@ def init_session_state():
     if "transcription_status" not in st.session_state:
         st.session_state["transcription_status"] = "idle"  # 処理状態（"idle", "processing", "completed", "error")
 
+    # 表情認識結果
+    if "face_emotion_result" not in st.session_state:
+        st.session_state["face_emotion_result"] = None  # 表情認識結果（dict | None）
+    if "face_emotion_status" not in st.session_state:
+        st.session_state["face_emotion_status"] = "idle"  # 処理状態（"idle", "processing", "completed", "error")
+
     # 対話関連
     if "conversation_history" not in st.session_state:
         st.session_state["conversation_history"] = []  # 対話履歴
