@@ -2,11 +2,11 @@
 
 import base64
 import cv2
-import numpy as np
+import json
 from openai import OpenAI
-from typing import tuple
 import os
 import tempfile
+from collections import Counter
 
 
 def extract_frames_from_webm(
@@ -23,16 +23,43 @@ def extract_frames_from_webm(
     Returns:
         抽出したフレームのリスト（各フレームはJPEG形式のbytes）
     """
-    # TODO: 担当1が実装してください
-    # 実装時の注意事項:
-    # 1. 一時ファイルにvideo_dataを保存
-    # 2. OpenCVでWebMを読み込み
-    # 3. 指定間隔（interval_seconds）ごとにフレームを抽出
-    # 4. 各フレームをJPEG形式にエンコードしてbytesのリストとして返す
-    # 5. 一時ファイルを削除
+    temp_video_path = None
+    cap = None
+    try:
+        if not video_data or len(video_data) < 100:
+            return []
 
-    # 仮実装: ダミーデータを返す
-    return []
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as f:
+            f.write(video_data)
+            temp_video_path = f.name
+
+        cap = cv2.VideoCapture(temp_video_path)
+        if not cap.isOpened():
+            return []
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if not fps or fps <= 0:
+            fps = 30.0
+        interval_frames = max(1, int(round(fps * max(0.1, interval_seconds))))
+
+        frames: list[bytes] = []
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % interval_frames == 0:
+                ok, buffer = cv2.imencode(".jpg", frame)
+                if ok:
+                    frames.append(buffer.tobytes())
+            frame_idx += 1
+
+        return frames
+    finally:
+        if cap is not None:
+            cap.release()
+        if temp_video_path and os.path.exists(temp_video_path):
+            os.remove(temp_video_path)
 
 
 def analyze_emotion_with_gpt4o_vision(
@@ -49,22 +76,48 @@ def analyze_emotion_with_gpt4o_vision(
     Returns:
         {"emotion": str, "confidence": float, "description": str}
     """
-    # TODO: 担当1が実装してください
-    # 実装時の注意事項:
-    # 1. フレームをbase64エンコード
-    # 2. GPT-4o Vision APIに送信
-    # 3. プロンプト: "この画像の人物の表情から感情を分析してください。"
-    #    感情（happy, sad, angry, surprised, neutral など）と信頼度（0.0-1.0）を
-    #    JSON形式で返してください。
-    # 4. レスポンスから感情と信頼度を抽出
-    # 5. エラー時は{"emotion": "neutral", "confidence": 0.0, "description": ""}を返す
+    try:
+        if not frame_image:
+            return {"emotion": "neutral", "confidence": 0.0, "description": ""}
 
-    # 仮実装: ダミーデータを返す
-    return {
-        "emotion": "neutral",
-        "confidence": 0.0,
-        "description": "（仮）ダミーデータ",
-    }
+        base64_image = base64.b64encode(frame_image).decode("utf-8")
+        prompt = (
+            "この画像の人物の表情から感情を分析してください。"
+            "次のJSONだけを返してください。"
+            '{"emotion":"happy|sad|angry|surprised|neutral|other","confidence":0.0,"description":""}'
+        )
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            },
+                        },
+                    ],
+                }
+            ],
+            temperature=0.2,
+        )
+
+        content = response.choices[0].message.content or ""
+        try:
+            data = json.loads(content)
+            return {
+                "emotion": str(data.get("emotion", "neutral")),
+                "confidence": float(data.get("confidence", 0.0)),
+                "description": str(data.get("description", "")),
+            }
+        except json.JSONDecodeError:
+            return {"emotion": "neutral", "confidence": 0.0, "description": content}
+    except Exception:
+        return {"emotion": "neutral", "confidence": 0.0, "description": ""}
 
 
 def analyze_face_emotion(
@@ -92,58 +145,32 @@ def analyze_face_emotion(
 
     Raises:
         Exception: 重大なエラーが発生した場合
-
-    TODO: 担当1が実装してください
     """
-    # ========================================
-    # 仮実装: ダミーデータを返す
-    # ========================================
-    # TODO: 以下の実装を削除し、実際の表情認識処理を実装してください
+    try:
+        frames = extract_frames_from_webm(video_data, interval_seconds)
+        if not frames:
+            return None, "error"
 
-    # 仮の戻り値
-    return (
-        {
-            "emotions": ["happy", "neutral", "happy"],
-            "dominant_emotion": "happy",
-            "confidence": 0.75,
-            "frame_count": 3,
-        },
-        "completed",
-    )
+        emotions: list[str] = []
+        confidences: list[float] = []
+        for frame in frames:
+            result = analyze_emotion_with_gpt4o_vision(frame, client)
+            emotions.append(result.get("emotion", "neutral"))
+            confidences.append(float(result.get("confidence", 0.0)))
 
-    # ========================================
-    # 実装時の注意事項:
-    # ========================================
-    # 1. extract_frames_from_webm()でフレーム抽出
-    # 2. 各フレームをanalyze_emotion_with_gpt4o_vision()で分析
-    # 3. 結果を集約（最も多い感情をdominant_emotionとして決定）
-    # 4. 平均信頼度を計算
-    # 5. エラー時は(None, "error")を返す
-    # 6. 重大なエラーはExceptionをraiseする
+        emotion_counts = Counter(emotions)
+        dominant_emotion = emotion_counts.most_common(1)[0][0]
 
-    # 実装例（参考）:
-    # try:
-    #     frames = extract_frames_from_webm(video_data, interval_seconds)
-    #     if not frames:
-    #         return None, "error"
-    #
-    #     emotions = []
-    #     confidences = []
-    #     for frame in frames:
-    #         result = analyze_emotion_with_gpt4o_vision(frame, client)
-    #         emotions.append(result["emotion"])
-    #         confidences.append(result["confidence"])
-    #
-    #     # 最も多い感情を決定
-    #     from collections import Counter
-    #     emotion_counts = Counter(emotions)
-    #     dominant_emotion = emotion_counts.most_common(1)[0][0]
-    #
-    #     return {
-    #         "emotions": emotions,
-    #         "dominant_emotion": dominant_emotion,
-    #         "confidence": sum(confidences) / len(confidences) if confidences else 0.0,
-    #         "frame_count": len(frames),
-    #     }, "completed"
-    # except Exception as e:
-    #     return None, "error"
+        return (
+            {
+                "emotions": emotions,
+                "dominant_emotion": dominant_emotion,
+                "confidence": sum(confidences) / len(confidences)
+                if confidences
+                else 0.0,
+                "frame_count": len(frames),
+            },
+            "completed",
+        )
+    except Exception:
+        return None, "error"

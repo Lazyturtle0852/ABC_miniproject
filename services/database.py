@@ -18,12 +18,19 @@ except ImportError:
 
 
 def get_db_connection():
-    """Supabaseデータベースへの接続を取得"""
+    """Supabaseデータベースへの接続を取得（Supabase推奨のDATABASE_URL形式を優先）"""
     if not PSYCOPG2_AVAILABLE:
         return None
     
     try:
-        # secrets.tomlから接続情報を取得
+        # Supabase推奨のDATABASE_URL形式を優先的に使用
+        database_url = st.secrets.get("DATABASE_URL")
+        if database_url:
+            # DATABASE_URLから直接接続
+            conn = psycopg2.connect(database_url)
+            return conn
+        
+        # 後方互換性のため、個別パラメータ形式もサポート
         db_config = {
             "host": st.secrets.get("SUPABASE_DB_HOST"),
             "port": st.secrets.get("SUPABASE_DB_PORT", "5432"),
@@ -66,10 +73,11 @@ def init_database():
     
     try:
         with conn.cursor() as cur:
-            # テーブル作成SQL
+            # テーブル作成SQL（usernameカラムを含む）
             create_table_sql = """
             CREATE TABLE IF NOT EXISTS conversation_history (
                 id SERIAL PRIMARY KEY,
+                username TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 transcription TEXT,
                 emotion_x REAL,
@@ -80,12 +88,33 @@ def init_database():
             """
             cur.execute(create_table_sql)
             
+            # 既存テーブルへのマイグレーション（usernameカラムが存在しない場合に追加）
+            try:
+                cur.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name='conversation_history' AND column_name='username'
+                """)
+                if cur.fetchone() is None:
+                    # usernameカラムが存在しない場合、追加
+                    cur.execute("ALTER TABLE conversation_history ADD COLUMN username TEXT;")
+                    logger.info("usernameカラムを追加しました")
+            except Exception as e:
+                logger.warning(f"マイグレーション処理中にエラーが発生しました: {e}")
+            
             # インデックス作成（パフォーマンス向上のため）
             create_index_sql = """
             CREATE INDEX IF NOT EXISTS idx_conversation_timestamp 
             ON conversation_history(timestamp DESC);
             """
             cur.execute(create_index_sql)
+            
+            # usernameカラムのインデックス作成
+            create_username_index_sql = """
+            CREATE INDEX IF NOT EXISTS idx_conversation_username 
+            ON conversation_history(username);
+            """
+            cur.execute(create_username_index_sql)
             
         conn.commit()
         conn.close()
@@ -99,10 +128,16 @@ def init_database():
         return False
 
 
-def save_conversation_to_db(conversation_data: Dict) -> bool:
+def save_conversation_to_db(conversation_data: Dict, username: str = None) -> bool:
     """対話履歴をデータベースに保存"""
+    # usernameがNoneの場合は保存しない
+    if username is None:
+        logger.warning("usernameがNoneのため、データベースへの保存をスキップします")
+        return False
+    
     conn = get_db_connection()
     if conn is None:
+        logger.warning("データベース接続が取得できませんでした")
         return False
     
     try:
@@ -118,19 +153,20 @@ def save_conversation_to_db(conversation_data: Dict) -> bool:
         with conn.cursor() as cur:
             insert_sql = """
             INSERT INTO conversation_history 
-            (timestamp, transcription, emotion_x, emotion_y, face_emotion, ai_response)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            (username, timestamp, transcription, emotion_x, emotion_y, face_emotion, ai_response)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
             cur.execute(
                 insert_sql,
-                (timestamp, transcription, emotion_x, emotion_y, face_emotion, ai_response)
+                (username, timestamp, transcription, emotion_x, emotion_y, face_emotion, ai_response)
             )
         
         conn.commit()
         conn.close()
+        logger.info(f"データベースへの保存に成功しました（ユーザー名: {username}）")
         return True
     except Exception as e:
-        logger.warning(f"データベース保存エラー（メモリのみモード）: {e}")
+        logger.warning(f"データベース保存エラー（ユーザー名: {username}）: {e}")
         try:
             conn.close()
         except:
@@ -138,21 +174,28 @@ def save_conversation_to_db(conversation_data: Dict) -> bool:
         return False
 
 
-def load_conversation_history_from_db() -> List[Dict]:
-    """データベースから対話履歴を読み込み"""
+def load_conversation_history_from_db(username: str = None) -> List[Dict]:
+    """データベースから対話履歴を読み込み（usernameでフィルタリング）"""
+    if username is None:
+        logger.warning("usernameがNoneのため、データベースからの読み込みをスキップします")
+        return []
+    
     conn = get_db_connection()
     if conn is None:
+        logger.warning("データベース接続が取得できませんでした")
         return []
     
     try:
         with conn.cursor() as cur:
+            # usernameでフィルタリング
             select_sql = """
             SELECT timestamp, transcription, emotion_x, emotion_y, face_emotion, ai_response
             FROM conversation_history
+            WHERE username = %s
             ORDER BY timestamp DESC
             LIMIT 100
             """
-            cur.execute(select_sql)
+            cur.execute(select_sql, (username,))
             rows = cur.fetchall()
         
         conn.close()
@@ -176,9 +219,10 @@ def load_conversation_history_from_db() -> List[Dict]:
                 "ai_response": ai_response or "",
             })
         
+        logger.info(f"データベースから{len(history)}件の履歴を読み込みました（ユーザー名: {username}）")
         return history
     except Exception as e:
-        logger.warning(f"データベース読み込みエラー（メモリのみモード）: {e}")
+        logger.warning(f"データベース読み込みエラー（ユーザー名: {username}）: {e}")
         try:
             conn.close()
         except:

@@ -1,5 +1,7 @@
 """文字起こし（たいきが実装）"""
 
+import os
+import tempfile
 from openai import OpenAI
 
 
@@ -21,42 +23,26 @@ def transcribe_video(video_data: bytes, client: OpenAI) -> tuple[str, str]:
 
     Raises:
         Exception: 重大なエラーが発生した場合（UI層でキャッチする想定）
-
-    TODO: C担当が実装してください
     """
-    # ========================================
-    # 仮実装: ダミーデータを返す
-    # ========================================
-    # TODO: 以下の実装を削除し、実際のWhisper API呼び出しを実装してください
+    if not video_data or len(video_data) < 100:
+        return "", "error"
 
-    # 仮の戻り値
-    return (
-        "（仮）文字起こし結果テキスト：録画データから音声を抽出して文字起こしを行いました。",
-        "completed",
-    )
+    temp_input_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(video_data)
+            temp_input_path = f.name
 
-    # ========================================
-    # 実装時の注意事項:
-    # ========================================
-    # 1. 一時ファイルにvideo_dataを保存
-    # 2. Whisper APIに送信（client.audio.transcriptions.create()）
-    # 3. 一時ファイルを削除（必ずfinallyで削除すること）
-    # 4. エラー時は("", "error")を返す
-    # 5. 重大なエラーはExceptionをraiseする
+        with open(temp_input_path, "rb") as f:
+            response = client.audio.transcriptions.create(
+                model="whisper-1", file=("audio.m4a", f), language="ja"
+            )
 
-    # 実装例（参考）:
-    # import os
-    # temp_video_file = "temp_recording.webm"
-    # try:
-    #     with open(temp_video_file, "wb") as f:
-    #         f.write(video_data)
-    #     with open(temp_video_file, "rb") as f:
-    #         response = client.audio.transcriptions.create(
-    #             model="whisper-1", file=f, language="ja"
-    #         )
-    #     return response.text, "completed"
-    # except Exception as e:
-    #     return "", "error"
-    # finally:
-    #     if os.path.exists(temp_video_file):
-    #         os.remove(temp_video_file)
+        return response.text, "completed"
+
+    except Exception as e:
+        print(f"Whisperエラー詳細: {str(e)}")
+        return "", "error"
+    finally:
+        if temp_input_path and os.path.exists(temp_input_path):
+            os.remove(temp_input_path)

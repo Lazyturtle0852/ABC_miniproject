@@ -51,9 +51,21 @@ def init_session_state():
         )
 
     # 対話関連
-    if "conversation_history" not in st.session_state:
-        # データベースから履歴を読み込む（利用可能な場合）
-        st.session_state["conversation_history"] = load_conversation_history()
+    # ユーザー名が設定されている場合、データベースから履歴を再読み込み
+    if "username" in st.session_state and st.session_state["username"]:
+        current_username = st.session_state["username"]
+        # 最後に読み込んだユーザー名を記録
+        last_loaded_username = st.session_state.get("last_loaded_username")
+        
+        # 履歴が存在しない、またはユーザー名が変更された場合に再読み込み
+        if ("conversation_history" not in st.session_state or 
+            last_loaded_username != current_username):
+            # データベースから履歴を読み込む（利用可能な場合）
+            st.session_state["conversation_history"] = load_conversation_history(current_username)
+            st.session_state["last_loaded_username"] = current_username
+    elif "conversation_history" not in st.session_state:
+        # ユーザー名が設定されていない場合は空リスト
+        st.session_state["conversation_history"] = []
     if "ai_response" not in st.session_state:
         st.session_state["ai_response"] = None  # AI応答
 
@@ -64,11 +76,11 @@ def init_session_state():
         st.session_state["db_initialized"] = True
 
 
-def load_conversation_history():
+def load_conversation_history(username: str = None):
     """対話履歴を読み込む（データベースから、または空リスト）"""
-    if is_db_available():
+    if username and is_db_available():
         try:
-            history = load_conversation_history_from_db()
+            history = load_conversation_history_from_db(username)
             return history
         except Exception as e:
             # エラー時は空リストを返す（メモリのみモード）
@@ -76,7 +88,7 @@ def load_conversation_history():
     return []
 
 
-def save_conversation(conversation_data):
+def save_conversation(conversation_data, username: str = None):
     """対話履歴を保存（session_stateには常に保存、DBは利用可能な場合のみ）"""
     # session_stateには常に保存
     if "conversation_history" not in st.session_state:
@@ -84,12 +96,16 @@ def save_conversation(conversation_data):
     st.session_state["conversation_history"].append(conversation_data)
 
     # データベースが利用可能な場合のみ保存
-    if is_db_available():
+    if username and is_db_available():
         try:
-            save_conversation_to_db(conversation_data)
-        except Exception:
+            success = save_conversation_to_db(conversation_data, username)
+            if not success:
+                import logging
+                logging.warning(f"データベースへの保存に失敗しました（ユーザー名: {username}）")
+        except Exception as e:
             # エラー時はスキップ（メモリのみモードで継続）
-            pass
+            import logging
+            logging.warning(f"データベース保存エラー（ユーザー名: {username}）: {e}")
 
 
 def get_openai_client():

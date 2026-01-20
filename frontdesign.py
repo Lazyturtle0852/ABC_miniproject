@@ -1,10 +1,13 @@
 """メインページ - ステップバイステップで自動進行"""
 
+import os
+import tempfile
 import streamlit as st
-import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from datetime import datetime
-from utils import init_session_state, get_openai_client
+from aiortc.contrib.media import MediaRecorder
+from streamlit_webrtc import WebRtcMode, webrtc_streamer
+from utils import init_session_state, get_openai_client, save_conversation
 from services.transcription import transcribe_video
 from services.face_analysis import analyze_face_emotion
 from services.ai_chat import generate_ai_response
@@ -19,6 +22,36 @@ st.set_page_config(
 # セッション状態の初期化
 init_session_state()
 
+# ユーザー名のチェックと入力フォーム
+if "username" not in st.session_state or not st.session_state["username"]:
+    st.title("🧘 AI対話振り返りメディテーション（MVP）")
+    st.markdown("---")
+    st.subheader("👤 ユーザー名を入力してください")
+    st.markdown("対話履歴を保存するために、ユーザー名を入力してください。")
+    
+    with st.form("username_form"):
+        username_input = st.text_input(
+            "ユーザー名",
+            placeholder="例: 山田太郎",
+            help="このユーザー名で対話履歴が保存されます。"
+        )
+        submitted = st.form_submit_button("開始", type="primary")
+        
+        if submitted:
+            if username_input and username_input.strip():
+                username = username_input.strip()
+                st.session_state["username"] = username
+                # ユーザー名設定後、データベースから履歴を読み込み
+                from utils import load_conversation_history
+                st.session_state["conversation_history"] = load_conversation_history(username)
+                st.session_state["last_loaded_username"] = username
+                st.success(f"ユーザー名「{username}」で開始します。")
+                st.rerun()
+            else:
+                st.error("ユーザー名を入力してください。")
+    
+    st.stop()  # ユーザー名が設定されるまで処理を停止
+
 # 現在のステップを管理（1: 感情入力, 2: 録画録音, 3: 対話結果）
 if "current_step" not in st.session_state:
     st.session_state["current_step"] = 1
@@ -27,6 +60,8 @@ if "current_step" not in st.session_state:
 client = get_openai_client()
 
 st.title("🧘 AI対話振り返りメディテーション（MVP）")
+# ユーザー名の表示
+st.caption(f"👤 ユーザー: {st.session_state['username']}")
 
 # プログレスバー
 steps = ["感情入力", "録画録音", "対話結果"]
@@ -204,271 +239,77 @@ if st.session_state["current_step"] == 1:
 # ============================
 elif st.session_state["current_step"] == 2:
     st.subheader("ステップ2: 📹 録画・録音")
-    st.markdown("カメラとマイクを使って、動画と音声を同時に録画します。")
-
+    st.markdown("録画を開始して、終了後に自動で分析へ進みます。")
+    st.info(
+        "💭 **今日一日、どんなことがありましたか？楽しかったこと、大変だったこと、何でも構いません。あなたの気持ちや考えを、1分ほど自由に話してみてください。**"
+    )
     left2, right2 = st.columns([1, 1], gap="large")
 
+    if (
+        "recording_path" not in st.session_state
+        or st.session_state["recording_path"] is None
+    ):
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
+        st.session_state["recording_path"] = temp_file.name
+        temp_file.close()
+
+    # クロージャでrecording_pathをキャプチャ（別スレッドからアクセスするため）
+    recording_path_value = st.session_state["recording_path"]
+
+    def in_recorder_factory():
+        return MediaRecorder(recording_path_value)
+
     with left2:
-        st.write("**② 収録コントロール**")
+        st.write("**② 録画コントロール**")
+        ctx = webrtc_streamer(
+            key="recorder",
+            mode=WebRtcMode.SENDRECV,
+            media_stream_constraints={"video": True, "audio": True},
+            in_recorder_factory=in_recorder_factory,
+            async_processing=True,
+        )
 
-        if not st.session_state["is_recording"]:
-            if st.button("▶️ スタート", use_container_width=True):
-                st.session_state["is_recording"] = True
-                st.session_state["recording_started_at"] = datetime.now().isoformat(
-                    timespec="seconds"
-                )
-                st.session_state["video_buffer"] = None
-                st.session_state["audio_buffer"] = None
-                st.session_state["captured_frame"] = None
-                st.session_state["captured_audio"] = None
-                st.success("収録を開始しました")
-                st.rerun()
-        else:
-            if st.button("⏹️ ストップ（収録完了）", use_container_width=True):
-                st.session_state["is_recording"] = False
-
-                if st.session_state["recorded_video_data"] is not None:
-                    st.session_state["video_buffer"] = st.session_state[
-                        "recorded_video_data"
-                    ]
-                    st.session_state["audio_buffer"] = st.session_state[
-                        "recorded_video_data"
-                    ]
-                else:
-                    if st.session_state["captured_frame"] is not None:
-                        st.session_state["video_buffer"] = st.session_state[
-                            "captured_frame"
-                        ].getvalue()
-                    else:
-                        st.session_state["video_buffer"] = b""
-                    if st.session_state["captured_audio"] is not None:
-                        st.session_state["audio_buffer"] = st.session_state[
-                            "captured_audio"
-                        ].getvalue()
-                    else:
-                        st.session_state["audio_buffer"] = b""
-
-                st.success(
-                    "収録を停止しました。文字起こしと表情認識処理を開始します..."
-                )
-
-                # 録画データがある場合、文字起こしと表情認識処理を自動実行
-                if (
-                    st.session_state["recorded_video_data"] is not None
-                    and client is not None
-                    and "OPENAI_API_KEY" in st.secrets
-                ):
-                    # 文字起こし処理
-                    with st.status(
-                        "録画データから音声を抽出して文字起こし中...", expanded=True
-                    ) as status:
-                        try:
-                            st.write("動画ファイルを読み込んでいます...")
-                            st.write(
-                                "Whisper APIに送信中...（動画ファイルから音声を抽出）"
-                            )
-                            st.session_state["transcription_status"] = "processing"
-
-                            # バックエンドサービスを呼び出し
-                            transcription_text, transcription_status = transcribe_video(
-                                st.session_state["recorded_video_data"], client
-                            )
-
-                            if transcription_status == "completed":
-                                st.session_state["transcription_result"] = (
-                                    transcription_text
-                                )
-                                st.session_state["transcription_status"] = "completed"
-                                status.update(
-                                    label="文字起こし完了！",
-                                    state="complete",
-                                    expanded=False,
-                                )
-                            else:
-                                st.session_state["transcription_status"] = "error"
-                                st.error("文字起こし処理中にエラーが発生しました")
-                                status.update(label="エラー発生", state="error")
-                        except Exception as e:
-                            st.session_state["transcription_status"] = "error"
-                            st.error(f"文字起こしエラー: {e}")
-                            status.update(label="エラー発生", state="error")
-
-                    # 表情認識処理
-                    with st.status(
-                        "録画データからフレームを抽出して表情認識中...", expanded=True
-                    ) as status_face:
-                        try:
-                            st.write(
-                                "動画ファイルから5秒ごとにフレームを抽出しています..."
-                            )
-                            st.write("GPT-4o Vision APIに送信中...")
-                            st.session_state["face_emotion_status"] = "processing"
-
-                            # バックエンドサービスを呼び出し
-                            face_emotion, face_status = analyze_face_emotion(
-                                st.session_state["recorded_video_data"], client
-                            )
-
-                            if face_status == "completed":
-                                st.session_state["face_emotion_result"] = face_emotion
-                                st.session_state["face_emotion_status"] = "completed"
-                                status_face.update(
-                                    label="表情認識完了！",
-                                    state="complete",
-                                    expanded=False,
-                                )
-                            else:
-                                st.session_state["face_emotion_status"] = "error"
-                                st.warning(
-                                    "表情認識処理中にエラーが発生しました（続行します）"
-                                )
-                                st.session_state["face_emotion_result"] = None
-                                status_face.update(
-                                    label="表情認識エラー（続行）",
-                                    state="error",
-                                    expanded=False,
-                                )
-                        except Exception as e:
-                            st.session_state["face_emotion_status"] = "error"
-                            st.warning(f"表情認識エラー: {e}（続行します）")
-                            st.session_state["face_emotion_result"] = None
-                            status_face.update(
-                                label="表情認識エラー（続行）",
-                                state="error",
-                                expanded=False,
-                            )
-
-                    # 文字起こしが完了したら自動的に次のステップへ（ここで遷移）
-                    if st.session_state["transcription_status"] == "completed":
-                        st.session_state["current_step"] = 3
-                        st.rerun()
-                else:
-                    st.warning(
-                        "録画データが見つかりません。またはAPIキーが設定されていません。"
-                    )
-
-                st.rerun()
-
-        if st.session_state["is_recording"]:
-            st.warning(
-                f"🔴 収録セッション開始中…（開始時刻: {st.session_state['recording_started_at']}）"
+        if ctx.state.playing and not st.session_state["was_playing"]:
+            st.session_state["was_playing"] = True
+            st.session_state["recording_started_at"] = datetime.now().isoformat(
+                timespec="seconds"
             )
+            st.session_state["recorded_video_data"] = None
+            st.session_state["transcription_result"] = None
+            st.session_state["transcription_status"] = "idle"
+            st.session_state["face_emotion_result"] = None
+            st.session_state["face_emotion_status"] = "idle"
+            st.session_state["ai_response"] = None
+            st.session_state["analysis_trigger"] = False
+
+        if ctx.state.playing:
+            st.info("録画中...")
         else:
-            st.success("⏸️ 停止中")
+            if st.session_state["was_playing"]:
+                st.session_state["was_playing"] = False
+                recording_path = st.session_state.get("recording_path")
+                if recording_path and os.path.exists(recording_path):
+                    file_size = os.path.getsize(recording_path)
+                    st.write(f"録画ファイルサイズ: {file_size:,} bytes")
+                    if file_size < 100:
+                        st.warning(
+                            "⚠️ 録画ファイルが小さすぎます。音声が録音されていない可能性があります。ブラウザのマイク許可を確認してください。"
+                        )
+                    with open(recording_path, "rb") as f:
+                        recorded_bytes = f.read()
+                    st.session_state["recorded_video_data"] = recorded_bytes
+                    st.session_state["analysis_trigger"] = True
+                    os.remove(recording_path)
+                    st.session_state["recording_path"] = None
+                    st.success("録画データを受け取りました。分析を開始します。")
+                    st.rerun()
+            st.info("停止中")
 
     with right2:
-        st.write("**③ 録画・録音**")
-
-        if st.session_state["is_recording"]:
-            st.info(
-                "📹 下の録画UIで録画を開始してください。カメラとマイクが同時に起動します。"
-            )
-
-            html_code = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <style>
-                    body { font-family: Arial, sans-serif; padding: 10px; }
-                    #videoPreview { width: 100%; max-width: 640px; border: 2px solid #ddd; border-radius: 8px; }
-                    #recordBtn, #stopBtn { padding: 10px 20px; font-size: 16px; margin: 5px; border-radius: 5px; border: none; cursor: pointer; }
-                    #recordBtn { background-color: #ff4444; color: white; }
-                    #recordBtn:hover { background-color: #cc0000; }
-                    #stopBtn { background-color: #666; color: white; }
-                    #stopBtn:hover { background-color: #444; }
-                    #stopBtn:disabled { background-color: #ccc; cursor: not-allowed; }
-                    .recording-indicator { display: inline-block; width: 12px; height: 12px; background-color: #ff4444; border-radius: 50%; animation: pulse 1.5s infinite; margin-right: 8px; }
-                    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-                    #status { margin-top: 10px; padding: 10px; border-radius: 5px; }
-                    .status-recording { background-color: #ffe6e6; color: #cc0000; }
-                    .status-ready { background-color: #e6f3ff; color: #0066cc; }
-                </style>
-            </head>
-            <body>
-                <video id="videoPreview" autoplay muted playsinline></video>
-                <div style="margin-top: 10px;">
-                    <button id="recordBtn" onclick="startRecording()">🔴 録画開始</button>
-                    <button id="stopBtn" onclick="stopRecording()" disabled>⏹ 録画停止</button>
-                </div>
-                <div id="status" class="status-ready">準備完了</div>
-                <script>
-                    let mediaRecorder;
-                    let recordedChunks = [];
-                    let stream;
-                    const videoPreview = document.getElementById('videoPreview');
-                    const recordBtn = document.getElementById('recordBtn');
-                    const stopBtn = document.getElementById('stopBtn');
-                    const statusDiv = document.getElementById('status');
-
-                    async function startRecording() {
-                        try {
-                            stream = await navigator.mediaDevices.getUserMedia({
-                                video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-                                audio: { echoCancellation: true, noiseSuppression: true }
-                            });
-                            videoPreview.srcObject = stream;
-                            const options = { mimeType: 'video/webm;codecs=vp8,opus', videoBitsPerSecond: 2500000 };
-                            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                                options.mimeType = 'video/webm';
-                            }
-                            mediaRecorder = new MediaRecorder(stream, options);
-                            recordedChunks = [];
-                            mediaRecorder.ondataavailable = (event) => {
-                                if (event.data && event.data.size > 0) {
-                                    recordedChunks.push(event.data);
-                                }
-                            };
-                            mediaRecorder.onstop = () => {
-                                const blob = new Blob(recordedChunks, { type: 'video/webm' });
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = 'recording_' + new Date().getTime() + '.webm';
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                                URL.revokeObjectURL(url);
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                    const base64data = reader.result;
-                                    sessionStorage.setItem('recorded_video', base64data);
-                                    window.parent.postMessage({type: 'recording_complete'}, '*');
-                                };
-                                reader.readAsDataURL(blob);
-                                stream.getTracks().forEach(track => track.stop());
-                                videoPreview.srcObject = null;
-                            };
-                            mediaRecorder.start(1000);
-                            recordBtn.disabled = true;
-                            stopBtn.disabled = false;
-                            statusDiv.innerHTML = '<span class="recording-indicator"></span>録画中...';
-                            statusDiv.className = 'status-recording';
-                        } catch (err) {
-                            console.error('Error:', err);
-                            statusDiv.textContent = 'エラー: ' + err.message;
-                        }
-                    }
-                    function stopRecording() {
-                        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                            mediaRecorder.stop();
-                            recordBtn.disabled = false;
-                            stopBtn.disabled = true;
-                            statusDiv.textContent = '録画を停止しました。データを処理中...';
-                            statusDiv.className = 'status-ready';
-                        }
-                    }
-                </script>
-            </body>
-            </html>
-            """
-
-            components.html(html_code, height=500)
-            st.success(
-                "✅ 録画が完了すると、自動的に動画ファイル（.webm形式）がダウンロードされます。"
-            )
-        else:
-            st.info("収録を開始すると、ここにカメラ/音声の入力UIが出ます。")
+        st.write("**③ 状態**")
+        if st.session_state["recording_started_at"]:
+            st.write(f"開始時刻: {st.session_state['recording_started_at']}")
+        st.info("録画を止めると自動で分析に進みます。")
 
         # 文字起こしが完了している場合、手動で次へ進むボタンを表示
         if st.session_state.get("transcription_status") == "completed":
@@ -481,6 +322,98 @@ elif st.session_state["current_step"] == 2:
             ):
                 st.session_state["current_step"] = 3
                 st.rerun()
+
+    # 録画データ受信後の自動分析
+    if st.session_state.get("analysis_trigger"):
+        st.session_state["analysis_trigger"] = False
+        st.success("収録を停止しました。文字起こしと表情認識処理を開始します...")
+
+        # 録画データがある場合、文字起こしと表情認識処理を自動実行
+        if (
+            st.session_state["recorded_video_data"] is not None
+            and client is not None
+            and "OPENAI_API_KEY" in st.secrets
+        ):
+            # 文字起こし処理
+            with st.status(
+                "録画データから音声を抽出して文字起こし中...", expanded=True
+            ) as status:
+                try:
+                    st.write("動画ファイルを読み込んでいます...")
+                    st.write("Whisper APIに送信中...（動画ファイルから音声を抽出）")
+                    st.session_state["transcription_status"] = "processing"
+
+                    # バックエンドサービスを呼び出し
+                    transcription_text, transcription_status = transcribe_video(
+                        st.session_state["recorded_video_data"], client
+                    )
+
+                    if transcription_status == "completed":
+                        st.session_state["transcription_result"] = transcription_text
+                        st.session_state["transcription_status"] = "completed"
+                        status.update(
+                            label="文字起こし完了！",
+                            state="complete",
+                            expanded=False,
+                        )
+                    else:
+                        st.session_state["transcription_status"] = "error"
+                        st.error("文字起こし処理中にエラーが発生しました")
+                        status.update(label="エラー発生", state="error")
+                except Exception as e:
+                    st.session_state["transcription_status"] = "error"
+                    st.error(f"文字起こしエラー: {e}")
+                    status.update(label="エラー発生", state="error")
+
+            # 表情認識処理
+            with st.status(
+                "録画データからフレームを抽出して表情認識中...", expanded=True
+            ) as status_face:
+                try:
+                    st.write("動画ファイルから5秒ごとにフレームを抽出しています...")
+                    st.write("GPT-4o Vision APIに送信中...")
+                    st.session_state["face_emotion_status"] = "processing"
+
+                    # バックエンドサービスを呼び出し
+                    face_emotion, face_status = analyze_face_emotion(
+                        st.session_state["recorded_video_data"], client
+                    )
+
+                    if face_status == "completed":
+                        st.session_state["face_emotion_result"] = face_emotion
+                        st.session_state["face_emotion_status"] = "completed"
+                        status_face.update(
+                            label="表情認識完了！",
+                            state="complete",
+                            expanded=False,
+                        )
+                    else:
+                        st.session_state["face_emotion_status"] = "error"
+                        st.warning("表情認識処理中にエラーが発生しました（続行します）")
+                        st.session_state["face_emotion_result"] = None
+                        status_face.update(
+                            label="表情認識エラー（続行）",
+                            state="error",
+                            expanded=False,
+                        )
+                except Exception as e:
+                    st.session_state["face_emotion_status"] = "error"
+                    st.warning(f"表情認識エラー: {e}（続行します）")
+                    st.session_state["face_emotion_result"] = None
+                    status_face.update(
+                        label="表情認識エラー（続行）",
+                        state="error",
+                        expanded=False,
+                    )
+
+            # 文字起こしが完了したら自動的に次のステップへ（ここで遷移）
+            if st.session_state["transcription_status"] == "completed":
+                st.session_state["current_step"] = 3
+                st.rerun()
+        else:
+            st.warning(
+                "録画データが見つかりません。またはAPIキーが設定されていません。"
+            )
 
 # ============================
 # ステップ3: 対話結果
@@ -515,17 +448,19 @@ elif st.session_state["current_step"] == 3:
                         if response_status == "completed":
                             st.session_state["ai_response"] = ai_response
 
-                            # 対話履歴に追加
-                            st.session_state["conversation_history"].append(
-                                {
-                                    "transcription": st.session_state[
-                                        "transcription_result"
-                                    ],
-                                    "emotion": st.session_state["emotion_coords"],
-                                    "ai_response": st.session_state["ai_response"],
-                                    "timestamp": datetime.now().isoformat(),
-                                }
-                            )
+                            # 対話履歴に追加（データベースにも保存）
+                            conversation_data = {
+                                "transcription": st.session_state[
+                                    "transcription_result"
+                                ],
+                                "emotion": st.session_state["emotion_coords"],
+                                "face_emotion": st.session_state.get(
+                                    "face_emotion_result"
+                                ),
+                                "ai_response": st.session_state["ai_response"],
+                                "timestamp": datetime.now().isoformat(),
+                            }
+                            save_conversation(conversation_data, st.session_state.get("username"))
 
                             st.rerun()
                         else:
@@ -558,6 +493,14 @@ elif st.session_state["current_step"] == 3:
                 f"対話 {len(st.session_state['conversation_history']) - i} - {conv.get('timestamp', '')[:10]}"
             ):
                 st.write(f"**感情座標:** {conv['emotion']}")
+                if conv.get("face_emotion"):
+                    face_info = conv["face_emotion"]
+                    dominant = face_info.get("dominant_emotion", "unknown")
+                    confidence = face_info.get("confidence", 0.0)
+                    frame_count = face_info.get("frame_count", 0)
+                    st.write(
+                        f"**表情分析:** {dominant} (信頼度: {confidence:.2f}, 分析フレーム数: {frame_count})"
+                    )
                 st.write(f"**あなた:** {conv['transcription']}")
                 st.write(f"**AI:** {conv['ai_response']}")
 
