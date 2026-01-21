@@ -20,16 +20,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed",  # サイドバーを最初から閉じる
 )
 
+
 # asyncioの例外ハンドラーを設定して、aioiceの内部エラーを抑制
 def suppress_aioice_errors(loop, context):
     """aioiceの内部エラーを抑制する例外ハンドラー"""
     exception = context.get("exception")
     message = context.get("message", "")
-    
+
     if exception:
         error_msg = str(exception)
         error_type = type(exception).__name__
-        
+
         # aioice/aiortcの内部エラーを無視
         if (
             "call_exception_handler" in error_msg
@@ -44,7 +45,7 @@ def suppress_aioice_errors(loop, context):
         ):
             # エラーを無視（ログに出力しない）
             return
-    
+
     # メッセージからもチェック
     if message:
         if (
@@ -321,24 +322,6 @@ elif st.session_state["current_step"] == 2:
 
     with left2:
         st.write("**② 録画コントロール**")
-        # STUN/TURNサーバーの設定（複数のSTUNサーバーを使用）
-        # Streamlit Cloud環境では、TURNサーバーが必要な場合があります
-        rtc_configuration = RTCConfiguration(
-            {
-                "iceServers": [
-                    {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["stun:stun1.l.google.com:19302"]},
-                    {"urls": ["stun:stun2.l.google.com:19302"]},
-                    # 無料のTURNサーバー（制限あり、接続が確立されない場合に使用）
-                    # 注意: 無料TURNサーバーは信頼性が低い場合があります
-                    # {
-                    #     "urls": "turn:openrelay.metered.ca:80",
-                    #     "username": "openrelayproject",
-                    #     "credential": "openrelayproject"
-                    # },
-                ]
-            }
-        )
 
         # webrtc_streamerの初期化（エラーは例外ハンドラーで抑制される）
         ctx = webrtc_streamer(
@@ -347,7 +330,9 @@ elif st.session_state["current_step"] == 2:
             media_stream_constraints={"video": True, "audio": True},
             in_recorder_factory=in_recorder_factory,
             async_processing=True,
-            rtc_configuration=rtc_configuration,
+            rtc_configuration={  # この設定を足す
+                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+            },
         )
 
         if ctx and ctx.state.playing and not st.session_state["was_playing"]:
