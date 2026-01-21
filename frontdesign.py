@@ -101,7 +101,7 @@ if st.session_state["current_step"] == 1:
         )
 
         if st.button(
-            "この座標で決定 / 次へ進む", type="primary", use_container_width=True
+            "この座標で決定 / 次へ進む", type="primary", width='stretch'
         ):
             st.session_state["emotion_coords"] = (float(x), float(y))
             st.session_state["current_step"] = 2
@@ -212,7 +212,7 @@ if st.session_state["current_step"] == 1:
         )
 
         selection = st.plotly_chart(
-            fig, use_container_width=True, on_select="rerun", key="emotion_plot"
+            fig, width='stretch', on_select="rerun", key="emotion_plot"
         )
 
         if selection and hasattr(selection, "selection") and selection.selection.points:
@@ -267,7 +267,7 @@ elif st.session_state["current_step"] == 2:
                 mode=WebRtcMode.SENDRECV,
                 media_stream_constraints={"video": True, "audio": True},
                 in_recorder_factory=in_recorder_factory,
-                async_processing=True,
+                async_processing=False,
             )
 
             # ctxとctx.stateがNoneでないことを確認してからアクセス
@@ -350,7 +350,7 @@ elif st.session_state["current_step"] == 2:
             if st.button(
                 "✅ 次のステップへ（対話結果）",
                 type="primary",
-                use_container_width=True,
+                width='stretch',
                 key="next_to_step3",
             ):
                 st.session_state["current_step"] = 3
@@ -539,7 +539,7 @@ elif st.session_state["current_step"] == 3:
 
     # 最初からやり直すボタン
     st.markdown("---")
-    if st.button("🔄 最初からやり直す", type="primary", use_container_width=True):
+    if st.button("🔄 最初からやり直す", type="primary", width='stretch'):
         st.session_state["current_step"] = 1
         st.session_state["is_recording"] = False
         st.session_state["transcription_result"] = None
