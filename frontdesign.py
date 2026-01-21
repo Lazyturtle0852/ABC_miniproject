@@ -14,7 +14,7 @@ from services.face_analysis import analyze_face_emotion
 from services.ai_chat import generate_ai_response
 
 st.set_page_config(
-    page_title="AI対話振り返りメディテーション MVP",
+    page_title="AI対話振り返りメディテーション 2",
     page_icon="🧘",
     layout="wide",
     initial_sidebar_state="collapsed",  # サイドバーを最初から閉じる

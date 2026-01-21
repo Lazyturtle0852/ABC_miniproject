@@ -148,10 +148,15 @@ def analyze_face_emotion(
         Exception: 重大なエラーが発生した場合
     """
     import traceback
+
     try:
         frames = extract_frames_from_webm(video_data, interval_seconds)
         if not frames:
-            return None, "error", "フレームの抽出に失敗しました（動画が空か無効な形式です）"
+            return (
+                None,
+                "error",
+                "フレームの抽出に失敗しました（動画が空か無効な形式です）",
+            )
 
         emotions: list[str] = []
         confidences: list[float] = []
