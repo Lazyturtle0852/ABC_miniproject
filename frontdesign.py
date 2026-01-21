@@ -257,6 +257,8 @@ elif st.session_state["current_step"] == 2:
     recording_path_value = st.session_state["recording_path"]
 
     def in_recorder_factory():
+        st.session_state["recorder_created"] = True
+        st.session_state["recorder_created_at"] = datetime.now().isoformat(timespec="seconds")
         return MediaRecorder(recording_path_value)
 
     with left2:
@@ -295,6 +297,16 @@ elif st.session_state["current_step"] == 2:
 
                 if is_playing:
                     st.info("録画中...")
+                    # 録画中のデバッグ情報
+                    recording_path = st.session_state.get("recording_path")
+                    if recording_path:
+                        if os.path.exists(recording_path):
+                            file_size = os.path.getsize(recording_path)
+                            st.caption(f"録画ファイル: {os.path.basename(recording_path)} ({file_size:,} bytes)")
+                        else:
+                            st.caption(f"録画ファイル: {os.path.basename(recording_path)} (まだ作成されていません)")
+                    if st.session_state.get("recorder_created"):
+                        st.caption(f"レコーダー作成時刻: {st.session_state.get('recorder_created_at', 'N/A')}")
                 else:
                     if st.session_state["was_playing"]:
                         st.session_state["was_playing"] = False
@@ -316,7 +328,27 @@ elif st.session_state["current_step"] == 2:
                             st.rerun()
                     st.info("停止中")
             else:
+                # デバッグ情報を表示
+                debug_info = []
+                if ctx is None:
+                    debug_info.append("ctx: None")
+                else:
+                    debug_info.append(f"ctx: {type(ctx).__name__}")
+                    if ctx.state is None:
+                        debug_info.append("ctx.state: None")
+                    else:
+                        debug_info.append(f"ctx.state.playing: {ctx.state.playing}")
+                        if hasattr(ctx.state, 'ice_connection_state'):
+                            debug_info.append(f"ctx.state.ice_connection_state: {ctx.state.ice_connection_state}")
+                        if hasattr(ctx.state, 'connection_state'):
+                            debug_info.append(f"ctx.state.connection_state: {ctx.state.connection_state}")
+                
+                with st.expander("🔍 デバッグ情報（接続状態）", expanded=True):
+                    for info in debug_info:
+                        st.text(info)
+                
                 st.info("WebRTC接続を初期化中...")
+                st.warning("⚠️ ブラウザでマイクとカメラの許可を確認してください。また、HTTPS接続が必要です。")
         except Exception as e:
             # WebRTC接続のエラーをキャッチして処理を続行
             # aioiceの内部エラーは無視して処理を続行
