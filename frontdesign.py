@@ -261,48 +261,81 @@ elif st.session_state["current_step"] == 2:
 
     with left2:
         st.write("**② 録画コントロール**")
-        ctx = webrtc_streamer(
-            key="recorder",
-            mode=WebRtcMode.SENDRECV,
-            media_stream_constraints={"video": True, "audio": True},
-            in_recorder_factory=in_recorder_factory,
-            async_processing=True,
-        )
-
-        if ctx.state.playing and not st.session_state["was_playing"]:
-            st.session_state["was_playing"] = True
-            st.session_state["recording_started_at"] = datetime.now().isoformat(
-                timespec="seconds"
+        try:
+            ctx = webrtc_streamer(
+                key="recorder",
+                mode=WebRtcMode.SENDRECV,
+                media_stream_constraints={"video": True, "audio": True},
+                in_recorder_factory=in_recorder_factory,
+                async_processing=True,
             )
-            st.session_state["recorded_video_data"] = None
-            st.session_state["transcription_result"] = None
-            st.session_state["transcription_status"] = "idle"
-            st.session_state["face_emotion_result"] = None
-            st.session_state["face_emotion_status"] = "idle"
-            st.session_state["ai_response"] = None
-            st.session_state["analysis_trigger"] = False
 
-        if ctx.state.playing:
-            st.info("録画中...")
-        else:
-            if st.session_state["was_playing"]:
+            # ctxとctx.stateがNoneでないことを確認してからアクセス
+            if ctx is not None and ctx.state is not None:
+                is_playing = ctx.state.playing
+                
+                if is_playing and not st.session_state["was_playing"]:
+                    st.session_state["was_playing"] = True
+                    st.session_state["recording_started_at"] = datetime.now().isoformat(
+                        timespec="seconds"
+                    )
+                    st.session_state["recorded_video_data"] = None
+                    st.session_state["transcription_result"] = None
+                    st.session_state["transcription_status"] = "idle"
+                    st.session_state["face_emotion_result"] = None
+                    st.session_state["face_emotion_status"] = "idle"
+                    st.session_state["ai_response"] = None
+                    st.session_state["analysis_trigger"] = False
+
+                if is_playing:
+                    st.info("録画中...")
+                else:
+                    if st.session_state["was_playing"]:
+                        st.session_state["was_playing"] = False
+                        recording_path = st.session_state.get("recording_path")
+                        if recording_path and os.path.exists(recording_path):
+                            file_size = os.path.getsize(recording_path)
+                            st.write(f"録画ファイルサイズ: {file_size:,} bytes")
+                            if file_size < 100:
+                                st.warning(
+                                    "⚠️ 録画ファイルが小さすぎます。音声が録音されていない可能性があります。ブラウザのマイク許可を確認してください。"
+                                )
+                            with open(recording_path, "rb") as f:
+                                recorded_bytes = f.read()
+                            st.session_state["recorded_video_data"] = recorded_bytes
+                            st.session_state["analysis_trigger"] = True
+                            os.remove(recording_path)
+                            st.session_state["recording_path"] = None
+                            st.success("録画データを受け取りました。分析を開始します。")
+                            st.rerun()
+                    st.info("停止中")
+            else:
+                st.info("WebRTC接続を初期化中...")
+        except (AttributeError, RuntimeError) as e:
+            # WebRTC接続のエラーをキャッチして処理を続行
+            st.warning(f"WebRTC接続でエラーが発生しました: {e}")
+            if st.session_state.get("was_playing"):
+                # 録画が停止した場合の処理
                 st.session_state["was_playing"] = False
                 recording_path = st.session_state.get("recording_path")
                 if recording_path and os.path.exists(recording_path):
-                    file_size = os.path.getsize(recording_path)
-                    st.write(f"録画ファイルサイズ: {file_size:,} bytes")
-                    if file_size < 100:
-                        st.warning(
-                            "⚠️ 録画ファイルが小さすぎます。音声が録音されていない可能性があります。ブラウザのマイク許可を確認してください。"
-                        )
-                    with open(recording_path, "rb") as f:
-                        recorded_bytes = f.read()
-                    st.session_state["recorded_video_data"] = recorded_bytes
-                    st.session_state["analysis_trigger"] = True
-                    os.remove(recording_path)
-                    st.session_state["recording_path"] = None
-                    st.success("録画データを受け取りました。分析を開始します。")
-                    st.rerun()
+                    try:
+                        file_size = os.path.getsize(recording_path)
+                        st.write(f"録画ファイルサイズ: {file_size:,} bytes")
+                        if file_size < 100:
+                            st.warning(
+                                "⚠️ 録画ファイルが小さすぎます。音声が録音されていない可能性があります。ブラウザのマイク許可を確認してください。"
+                            )
+                        with open(recording_path, "rb") as f:
+                            recorded_bytes = f.read()
+                        st.session_state["recorded_video_data"] = recorded_bytes
+                        st.session_state["analysis_trigger"] = True
+                        os.remove(recording_path)
+                        st.session_state["recording_path"] = None
+                        st.success("録画データを受け取りました。分析を開始します。")
+                        st.rerun()
+                    except Exception as cleanup_error:
+                        st.error(f"録画ファイルの処理中にエラーが発生しました: {cleanup_error}")
             st.info("停止中")
 
     with right2:
