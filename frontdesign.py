@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import asyncio
 import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime
@@ -11,6 +12,36 @@ from utils import init_session_state, get_openai_client, save_conversation
 from services.transcription import transcribe_video
 from services.face_analysis import analyze_face_emotion
 from services.ai_chat import generate_ai_response
+
+# asyncioの例外ハンドラーを設定して、aioiceの内部エラーを抑制
+def suppress_aioice_errors(loop, context):
+    """aioiceの内部エラーを抑制する例外ハンドラー"""
+    exception = context.get('exception')
+    if exception:
+        error_msg = str(exception)
+        # aioiceの内部エラーを無視
+        if (
+            "call_exception_handler" in error_msg
+            or "is_alive" in error_msg
+            or "sendto" in error_msg
+            or "NoneType" in error_msg
+            or "AttributeError" in type(exception).__name__
+        ):
+            # エラーを無視（ログに出力しない）
+            return
+    
+    # その他のエラーは標準のハンドラーに渡す
+    loop.default_exception_handler(context)
+
+# 現在のイベントループに例外ハンドラーを設定
+try:
+    loop = asyncio.get_event_loop()
+    if loop and not hasattr(loop, '_aioice_handler_set'):
+        loop.set_exception_handler(suppress_aioice_errors)
+        loop._aioice_handler_set = True
+except RuntimeError:
+    # イベントループが存在しない場合は無視
+    pass
 
 st.set_page_config(
     page_title="AI対話振り返りメディテーション MVP",
@@ -353,12 +384,20 @@ elif st.session_state["current_step"] == 2:
             # WebRTC接続のエラーをキャッチして処理を続行
             # aioiceの内部エラーは無視して処理を続行
             error_msg = str(e)
+            error_type = type(e).__name__
             if (
                 "call_exception_handler" in error_msg
                 or "is_alive" in error_msg
                 or "sendto" in error_msg
+                or "NoneType" in error_msg
+                or "AttributeError" in error_type
+                or "aioice" in error_msg.lower()
+                or "Transaction.__retry" in error_msg
             ):
                 # aioiceの内部エラーは無視（アプリの動作には影響しない）
+                # デバッグモードでのみ表示
+                if st.session_state.get("debug_mode", False):
+                    st.caption(f"⚠️ 内部エラー（無視）: {error_type}")
                 pass
             else:
                 st.warning(f"WebRTC接続でエラーが発生しました: {e}")
