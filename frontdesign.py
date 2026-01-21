@@ -295,9 +295,23 @@ elif st.session_state["current_step"] == 2:
     with left2:
         st.write("**② 録画コントロール**")
         try:
-            # STUNサーバーの設定（GoogleのパブリックSTUNサーバーを使用）
+            # STUN/TURNサーバーの設定（複数のSTUNサーバーを使用）
+            # Streamlit Cloud環境では、TURNサーバーが必要な場合があります
             rtc_configuration = RTCConfiguration(
-                {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+                {
+                    "iceServers": [
+                        {"urls": ["stun:stun.l.google.com:19302"]},
+                        {"urls": ["stun:stun1.l.google.com:19302"]},
+                        {"urls": ["stun:stun2.l.google.com:19302"]},
+                        # 無料のTURNサーバー（制限あり、接続が確立されない場合に使用）
+                        # 注意: 無料TURNサーバーは信頼性が低い場合があります
+                        # {
+                        #     "urls": "turn:openrelay.metered.ca:80",
+                        #     "username": "openrelayproject",
+                        #     "credential": "openrelayproject"
+                        # },
+                    ]
+                }
             )
 
             ctx = webrtc_streamer(
@@ -327,18 +341,21 @@ elif st.session_state["current_step"] == 2:
                     st.session_state["analysis_trigger"] = False
 
                 if is_playing:
-                    st.info("録画中...")
+                    st.success("✅ 録画中...")
                     # 録画中のデバッグ情報
                     recording_path = st.session_state.get("recording_path")
                     if recording_path:
                         if os.path.exists(recording_path):
                             file_size = os.path.getsize(recording_path)
-                            st.caption(f"録画ファイル: {os.path.basename(recording_path)} ({file_size:,} bytes)")
+                            st.caption(f"📹 録画ファイル: {os.path.basename(recording_path)} ({file_size:,} bytes)")
                         else:
-                            st.caption(f"録画ファイル: {os.path.basename(recording_path)} (まだ作成されていません)")
+                            st.caption(f"⚠️ 録画ファイル: {os.path.basename(recording_path)} (まだ作成されていません)")
                     if st.session_state.get("recorder_created"):
-                        st.caption(f"レコーダー作成時刻: {st.session_state.get('recorder_created_at', 'N/A')}")
+                        st.caption(f"🎙️ レコーダー作成時刻: {st.session_state.get('recorder_created_at', 'N/A')}")
                 else:
+                    # 接続は確立されているが、録画が開始されていない場合
+                    if hasattr(ctx.state, 'ice_connection_state') and ctx.state.ice_connection_state == "connected":
+                        st.warning("⚠️ WebRTC接続は確立されていますが、録画が開始されていません。ブラウザでマイク/カメラの許可を確認してください。")
                     if st.session_state["was_playing"]:
                         st.session_state["was_playing"] = False
                         recording_path = st.session_state.get("recording_path")
@@ -361,25 +378,75 @@ elif st.session_state["current_step"] == 2:
             else:
                 # デバッグ情報を表示
                 debug_info = []
+                connection_status = "未接続"
+                
                 if ctx is None:
-                    debug_info.append("ctx: None")
+                    debug_info.append("❌ ctx: None (WebRTCコンテキストが作成されていません)")
+                    connection_status = "コンテキスト未作成"
                 else:
-                    debug_info.append(f"ctx: {type(ctx).__name__}")
+                    debug_info.append(f"✅ ctx: {type(ctx).__name__}")
                     if ctx.state is None:
-                        debug_info.append("ctx.state: None")
+                        debug_info.append("⚠️ ctx.state: None (状態が取得できません)")
+                        connection_status = "状態取得失敗"
                     else:
-                        debug_info.append(f"ctx.state.playing: {ctx.state.playing}")
+                        debug_info.append(f"📊 ctx.state.playing: {ctx.state.playing}")
                         if hasattr(ctx.state, 'ice_connection_state'):
-                            debug_info.append(f"ctx.state.ice_connection_state: {ctx.state.ice_connection_state}")
+                            ice_state = ctx.state.ice_connection_state
+                            debug_info.append(f"🔗 ICE接続状態: {ice_state}")
+                            if ice_state == "connected":
+                                connection_status = "✅ 接続済み"
+                            elif ice_state == "connecting":
+                                connection_status = "🔄 接続中..."
+                            elif ice_state == "failed":
+                                connection_status = "❌ 接続失敗"
+                            elif ice_state == "disconnected":
+                                connection_status = "⚠️ 切断中"
+                            else:
+                                connection_status = f"状態: {ice_state}"
                         if hasattr(ctx.state, 'connection_state'):
-                            debug_info.append(f"ctx.state.connection_state: {ctx.state.connection_state}")
+                            debug_info.append(f"🔌 接続状態: {ctx.state.connection_state}")
+                        if hasattr(ctx.state, 'ice_gathering_state'):
+                            debug_info.append(f"🌐 ICE収集状態: {ctx.state.ice_gathering_state}")
+                
+                # 録画ファイルの状態
+                recording_path = st.session_state.get("recording_path")
+                if recording_path:
+                    debug_info.append(f"📁 録画ファイルパス: {recording_path}")
+                    if os.path.exists(recording_path):
+                        file_size = os.path.getsize(recording_path)
+                        debug_info.append(f"📦 ファイルサイズ: {file_size:,} bytes")
+                    else:
+                        debug_info.append("⚠️ 録画ファイルがまだ作成されていません")
+                
+                # レコーダーの状態
+                if st.session_state.get("recorder_created"):
+                    debug_info.append(f"🎙️ レコーダー作成時刻: {st.session_state.get('recorder_created_at', 'N/A')}")
+                else:
+                    debug_info.append("⚠️ レコーダーがまだ作成されていません")
                 
                 with st.expander("🔍 デバッグ情報（接続状態）", expanded=True):
+                    st.markdown(f"**接続ステータス**: {connection_status}")
+                    st.markdown("---")
                     for info in debug_info:
                         st.text(info)
+                    
+                    # Streamlit Cloud環境でのトラブルシューティング
+                    st.markdown("---")
+                    st.markdown("**💡 トラブルシューティング:**")
+                    st.markdown("""
+                    - **ブラウザのマイク/カメラ許可**: ブラウザの設定で許可を確認してください
+                    - **HTTPS接続**: Streamlit CloudはHTTPS接続が必要です
+                    - **ネットワーク環境**: 企業ネットワークやファイアウォールがWebRTCをブロックしている可能性があります
+                    - **ICE接続状態が「failed」の場合**: TURNサーバーが必要な可能性があります
+                    """)
                 
                 st.info("WebRTC接続を初期化中...")
-                st.warning("⚠️ ブラウザでマイクとカメラの許可を確認してください。また、HTTPS接続が必要です。")
+                if connection_status == "❌ 接続失敗":
+                    st.error("⚠️ WebRTC接続に失敗しました。ブラウザのコンソールを確認してください。")
+                elif connection_status == "🔄 接続中...":
+                    st.warning("🔄 WebRTC接続を確立中です。しばらくお待ちください...")
+                else:
+                    st.warning("⚠️ ブラウザでマイクとカメラの許可を確認してください。また、HTTPS接続が必要です。")
         except Exception as e:
             # WebRTC接続のエラーをキャッチして処理を続行
             # aioiceの内部エラーは無視して処理を続行
