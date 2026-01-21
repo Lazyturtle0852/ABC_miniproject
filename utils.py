@@ -114,3 +114,21 @@ def get_openai_client():
         return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     except (KeyError, AttributeError):
         return None
+
+
+def get_ice_servers():
+    """TwilioからICEサーバー情報を取得（設定されていない場合はSTUNのみ）"""
+    try:
+        if "TWILIO_ACCOUNT_SID" in st.secrets and "TWILIO_AUTH_TOKEN" in st.secrets:
+            from twilio.rest import Client
+
+            client = Client(
+                st.secrets["TWILIO_ACCOUNT_SID"], st.secrets["TWILIO_AUTH_TOKEN"]
+            )
+            token = client.tokens.create()
+            return token.ice_servers
+    except Exception:
+        pass
+
+    # フォールバック: STUNサーバーのみ
+    return [{"urls": ["stun:stun.l.google.com:19302"]}]

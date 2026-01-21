@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 from aiortc.contrib.media import MediaRecorder
 from streamlit_webrtc import WebRtcMode, webrtc_streamer, RTCConfiguration
-from utils import init_session_state, get_openai_client, save_conversation
+from utils import init_session_state, get_openai_client, save_conversation, get_ice_servers
 from services.transcription import transcribe_video
 from services.face_analysis import analyze_face_emotion
 from services.ai_chat import generate_ai_response
