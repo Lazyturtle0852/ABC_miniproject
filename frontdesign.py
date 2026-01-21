@@ -8,7 +8,12 @@ import plotly.graph_objects as go
 from datetime import datetime
 from aiortc.contrib.media import MediaRecorder
 from streamlit_webrtc import WebRtcMode, webrtc_streamer, RTCConfiguration
-from utils import init_session_state, get_openai_client, save_conversation, get_ice_servers
+from utils import (
+    init_session_state,
+    get_openai_client,
+    save_conversation,
+    get_ice_servers,
+)
 from services.transcription import transcribe_video
 from services.face_analysis import analyze_face_emotion
 from services.ai_chat import generate_ai_response
@@ -84,7 +89,7 @@ init_session_state()
 
 # ユーザー名のチェックと入力フォーム
 if "username" not in st.session_state or not st.session_state["username"]:
-    st.title("🧘 AI対話振り返りメディテーション（MVP）")
+    st.title("🧘 AI対話振り返りメディテーション")
     st.markdown("---")
     st.subheader("👤 ユーザー名を入力してください")
     st.markdown("対話履歴を保存するために、ユーザー名を入力してください。")
