@@ -168,7 +168,7 @@ if st.session_state["current_step"] == 1:
             step=0.01,
         )
 
-        if st.button("この座標で決定 / 次へ進む", type="primary", width="stretch"):
+        if st.button("この座標で決定 / 次へ進む", type="primary", use_container_width=True):
             st.session_state["emotion_coords"] = (float(x), float(y))
             st.session_state["current_step"] = 2
             st.success(f"保存しました: {st.session_state['emotion_coords']}")
@@ -278,7 +278,7 @@ if st.session_state["current_step"] == 1:
         )
 
         selection = st.plotly_chart(
-            fig, width="stretch", on_select="rerun", key="emotion_plot"
+            fig, use_container_width=True, on_select="rerun", key="emotion_plot"
         )
 
         if selection and hasattr(selection, "selection") and selection.selection.points:
@@ -388,7 +388,7 @@ elif st.session_state["current_step"] == 2:
             if st.button(
                 "✅ 次のステップへ（対話結果）",
                 type="primary",
-                width="stretch",
+                use_container_width=True,
                 key="next_to_step3",
             ):
                 st.session_state["current_step"] = 3
@@ -591,7 +591,7 @@ elif st.session_state["current_step"] == 3:
 
     # 最初からやり直すボタン
     st.markdown("---")
-    if st.button("🔄 最初からやり直す", type="primary", width="stretch"):
+    if st.button("🔄 最初からやり直す", type="primary", use_container_width=True):
         st.session_state["current_step"] = 1
         st.session_state["is_recording"] = False
         st.session_state["transcription_result"] = None
