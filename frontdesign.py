@@ -344,7 +344,7 @@ elif st.session_state["current_step"] == 2:
                     st.session_state["transcription_status"] = "processing"
 
                     # バックエンドサービスを呼び出し
-                    transcription_text, transcription_status = transcribe_video(
+                    transcription_text, transcription_status, error_msg = transcribe_video(
                         st.session_state["recorded_video_data"], client
                     )
 
@@ -358,11 +358,12 @@ elif st.session_state["current_step"] == 2:
                         )
                     else:
                         st.session_state["transcription_status"] = "error"
-                        st.error("文字起こし処理中にエラーが発生しました")
+                        st.error(f"文字起こし処理中にエラーが発生しました\n詳細: {error_msg}")
                         status.update(label="エラー発生", state="error")
                 except Exception as e:
                     st.session_state["transcription_status"] = "error"
-                    st.error(f"文字起こしエラー: {e}")
+                    import traceback
+                    st.error(f"文字起こしエラー: {e}\n詳細: {traceback.format_exc()}")
                     status.update(label="エラー発生", state="error")
 
             # 表情認識処理
@@ -375,7 +376,7 @@ elif st.session_state["current_step"] == 2:
                     st.session_state["face_emotion_status"] = "processing"
 
                     # バックエンドサービスを呼び出し
-                    face_emotion, face_status = analyze_face_emotion(
+                    face_emotion, face_status, error_msg = analyze_face_emotion(
                         st.session_state["recorded_video_data"], client
                     )
 
@@ -389,7 +390,7 @@ elif st.session_state["current_step"] == 2:
                         )
                     else:
                         st.session_state["face_emotion_status"] = "error"
-                        st.warning("表情認識処理中にエラーが発生しました（続行します）")
+                        st.warning(f"表情認識処理中にエラーが発生しました（続行します）\n詳細: {error_msg}")
                         st.session_state["face_emotion_result"] = None
                         status_face.update(
                             label="表情認識エラー（続行）",
@@ -398,7 +399,8 @@ elif st.session_state["current_step"] == 2:
                         )
                 except Exception as e:
                     st.session_state["face_emotion_status"] = "error"
-                    st.warning(f"表情認識エラー: {e}（続行します）")
+                    import traceback
+                    st.warning(f"表情認識エラー: {e}（続行します）\n詳細: {traceback.format_exc()}")
                     st.session_state["face_emotion_result"] = None
                     status_face.update(
                         label="表情認識エラー（続行）",

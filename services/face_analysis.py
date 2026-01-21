@@ -124,7 +124,7 @@ def analyze_face_emotion(
     video_data: bytes,
     client: OpenAI,
     interval_seconds: float = 5.0,
-) -> tuple[dict | None, str]:
+) -> tuple[dict | None, str, str]:
     """
     WebM録画データから表情認識を実行（GPT-4o Vision使用）
 
@@ -134,7 +134,7 @@ def analyze_face_emotion(
         interval_seconds: フレーム抽出間隔（秒、デフォルト: 5.0）
 
     Returns:
-        (face_emotion_result, status) のタプル
+        (face_emotion_result, status, error_message) のタプル
         - face_emotion_result: {
             "emotions": list[str],  # 各フレームの感情リスト
             "dominant_emotion": str,  # 最も多い感情
@@ -142,14 +142,16 @@ def analyze_face_emotion(
             "frame_count": int  # 分析したフレーム数
           } または None
         - status: "completed" または "error"
+        - error_message: エラーメッセージ（エラー時）
 
     Raises:
         Exception: 重大なエラーが発生した場合
     """
+    import traceback
     try:
         frames = extract_frames_from_webm(video_data, interval_seconds)
         if not frames:
-            return None, "error"
+            return None, "error", "フレームの抽出に失敗しました（動画が空か無効な形式です）"
 
         emotions: list[str] = []
         confidences: list[float] = []
@@ -171,6 +173,9 @@ def analyze_face_emotion(
                 "frame_count": len(frames),
             },
             "completed",
+            "",
         )
-    except Exception:
-        return None, "error"
+    except Exception as e:
+        error_msg = f"表情認識エラー: {str(e)}\n詳細: {traceback.format_exc()}"
+        print(error_msg)
+        return None, "error", error_msg
