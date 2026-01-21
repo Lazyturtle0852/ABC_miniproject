@@ -6,7 +6,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime
 from aiortc.contrib.media import MediaRecorder
-from streamlit_webrtc import WebRtcMode, webrtc_streamer
+from streamlit_webrtc import WebRtcMode, webrtc_streamer, RTCConfiguration
 from utils import init_session_state, get_openai_client, save_conversation
 from services.transcription import transcribe_video
 from services.face_analysis import analyze_face_emotion
@@ -262,12 +262,18 @@ elif st.session_state["current_step"] == 2:
     with left2:
         st.write("**② 録画コントロール**")
         try:
+            # STUNサーバーの設定（GoogleのパブリックSTUNサーバーを使用）
+            rtc_configuration = RTCConfiguration(
+                {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+            )
+
             ctx = webrtc_streamer(
                 key="recorder",
                 mode=WebRtcMode.SENDRECV,
                 media_stream_constraints={"video": True, "audio": True},
                 in_recorder_factory=in_recorder_factory,
                 async_processing=False,
+                rtc_configuration=rtc_configuration,
             )
 
             # ctxとctx.stateがNoneでないことを確認してからアクセス
@@ -311,9 +317,19 @@ elif st.session_state["current_step"] == 2:
                     st.info("停止中")
             else:
                 st.info("WebRTC接続を初期化中...")
-        except (AttributeError, RuntimeError) as e:
+        except Exception as e:
             # WebRTC接続のエラーをキャッチして処理を続行
-            st.warning(f"WebRTC接続でエラーが発生しました: {e}")
+            # aioiceの内部エラーは無視して処理を続行
+            error_msg = str(e)
+            if (
+                "call_exception_handler" in error_msg
+                or "is_alive" in error_msg
+                or "sendto" in error_msg
+            ):
+                # aioiceの内部エラーは無視（アプリの動作には影響しない）
+                pass
+            else:
+                st.warning(f"WebRTC接続でエラーが発生しました: {e}")
             if st.session_state.get("was_playing"):
                 # 録画が停止した場合の処理
                 st.session_state["was_playing"] = False
