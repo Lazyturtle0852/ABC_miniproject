@@ -28,28 +28,31 @@ if "username" not in st.session_state or not st.session_state["username"]:
     st.markdown("---")
     st.subheader("👤 ユーザー名を入力してください")
     st.markdown("対話履歴を保存するために、ユーザー名を入力してください。")
-    
+
     with st.form("username_form"):
         username_input = st.text_input(
             "ユーザー名",
             placeholder="例: 山田太郎",
-            help="このユーザー名で対話履歴が保存されます。"
+            help="このユーザー名で対話履歴が保存されます。",
         )
         submitted = st.form_submit_button("開始", type="primary")
-        
+
         if submitted:
             if username_input and username_input.strip():
                 username = username_input.strip()
                 st.session_state["username"] = username
                 # ユーザー名設定後、データベースから履歴を読み込み
                 from utils import load_conversation_history
-                st.session_state["conversation_history"] = load_conversation_history(username)
+
+                st.session_state["conversation_history"] = load_conversation_history(
+                    username
+                )
                 st.session_state["last_loaded_username"] = username
                 st.success(f"ユーザー名「{username}」で開始します。")
                 st.rerun()
             else:
                 st.error("ユーザー名を入力してください。")
-    
+
     st.stop()  # ユーザー名が設定されるまで処理を停止
 
 # 現在のステップを管理（1: 感情入力, 2: 録画録音, 3: 対話結果）
@@ -100,9 +103,7 @@ if st.session_state["current_step"] == 1:
             step=0.01,
         )
 
-        if st.button(
-            "この座標で決定 / 次へ進む", type="primary", use_container_width=True
-        ):
+        if st.button("この座標で決定 / 次へ進む", type="primary", width="stretch"):
             st.session_state["emotion_coords"] = (float(x), float(y))
             st.session_state["current_step"] = 2
             st.success(f"保存しました: {st.session_state['emotion_coords']}")
@@ -212,7 +213,7 @@ if st.session_state["current_step"] == 1:
         )
 
         selection = st.plotly_chart(
-            fig, use_container_width=True, on_select="rerun", key="emotion_plot"
+            fig, width="stretch", on_select="rerun", key="emotion_plot"
         )
 
         if selection and hasattr(selection, "selection") and selection.selection.points:
@@ -317,7 +318,7 @@ elif st.session_state["current_step"] == 2:
             if st.button(
                 "✅ 次のステップへ（対話結果）",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="next_to_step3",
             ):
                 st.session_state["current_step"] = 3
@@ -344,8 +345,10 @@ elif st.session_state["current_step"] == 2:
                     st.session_state["transcription_status"] = "processing"
 
                     # バックエンドサービスを呼び出し
-                    transcription_text, transcription_status, error_msg = transcribe_video(
-                        st.session_state["recorded_video_data"], client
+                    transcription_text, transcription_status, error_msg = (
+                        transcribe_video(
+                            st.session_state["recorded_video_data"], client
+                        )
                     )
 
                     if transcription_status == "completed":
@@ -358,11 +361,14 @@ elif st.session_state["current_step"] == 2:
                         )
                     else:
                         st.session_state["transcription_status"] = "error"
-                        st.error(f"文字起こし処理中にエラーが発生しました\n詳細: {error_msg}")
+                        st.error(
+                            f"文字起こし処理中にエラーが発生しました\n詳細: {error_msg}"
+                        )
                         status.update(label="エラー発生", state="error")
                 except Exception as e:
                     st.session_state["transcription_status"] = "error"
                     import traceback
+
                     st.error(f"文字起こしエラー: {e}\n詳細: {traceback.format_exc()}")
                     status.update(label="エラー発生", state="error")
 
@@ -390,7 +396,9 @@ elif st.session_state["current_step"] == 2:
                         )
                     else:
                         st.session_state["face_emotion_status"] = "error"
-                        st.warning(f"表情認識処理中にエラーが発生しました（続行します）\n詳細: {error_msg}")
+                        st.warning(
+                            f"表情認識処理中にエラーが発生しました（続行します）\n詳細: {error_msg}"
+                        )
                         st.session_state["face_emotion_result"] = None
                         status_face.update(
                             label="表情認識エラー（続行）",
@@ -400,7 +408,10 @@ elif st.session_state["current_step"] == 2:
                 except Exception as e:
                     st.session_state["face_emotion_status"] = "error"
                     import traceback
-                    st.warning(f"表情認識エラー: {e}（続行します）\n詳細: {traceback.format_exc()}")
+
+                    st.warning(
+                        f"表情認識エラー: {e}（続行します）\n詳細: {traceback.format_exc()}"
+                    )
                     st.session_state["face_emotion_result"] = None
                     status_face.update(
                         label="表情認識エラー（続行）",
@@ -462,7 +473,9 @@ elif st.session_state["current_step"] == 3:
                                 "ai_response": st.session_state["ai_response"],
                                 "timestamp": datetime.now().isoformat(),
                             }
-                            save_conversation(conversation_data, st.session_state.get("username"))
+                            save_conversation(
+                                conversation_data, st.session_state.get("username")
+                            )
 
                             st.rerun()
                         else:
@@ -508,7 +521,7 @@ elif st.session_state["current_step"] == 3:
 
     # 最初からやり直すボタン
     st.markdown("---")
-    if st.button("🔄 最初からやり直す", type="primary", use_container_width=True):
+    if st.button("🔄 最初からやり直す", type="primary", width="stretch"):
         st.session_state["current_step"] = 1
         st.session_state["is_recording"] = False
         st.session_state["transcription_result"] = None
