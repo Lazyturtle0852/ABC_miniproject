@@ -1,5 +1,6 @@
 # Streamlit関連
-streamlit>=1.28.0
+# v1.42.0のasyncio関連バグを回避するため1.41.1に固定
+streamlit==1.41.1
 
 # データ可視化
 plotly>=5.17.0
