@@ -328,16 +328,16 @@ elif st.session_state["current_step"] == 2:
     with left2:
         st.write("**② 録画コントロール**")
 
-        # webrtc_streamerの初期化（エラーは例外ハンドラーで抑制される）
+        # webrtc_streamerの初期化（Twilio TURNサーバーを使用）
+        # Twilioが設定されていない場合はSTUNサーバーのみを使用（フォールバック）
+        ice_servers = get_ice_servers()
         ctx = webrtc_streamer(
             key="recorder",
             mode=WebRtcMode.SENDRECV,
             media_stream_constraints={"video": True, "audio": True},
             in_recorder_factory=in_recorder_factory,
             async_processing=True,
-            rtc_configuration={  # この設定を足す
-                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-            },
+            rtc_configuration=RTCConfiguration({"iceServers": ice_servers}),
         )
 
         if ctx and ctx.state.playing and not st.session_state["was_playing"]:
