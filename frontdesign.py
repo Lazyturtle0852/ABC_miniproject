@@ -24,21 +24,45 @@ st.set_page_config(
 def suppress_aioice_errors(loop, context):
     """aioiceの内部エラーを抑制する例外ハンドラー"""
     exception = context.get("exception")
+    message = context.get("message", "")
+    
     if exception:
         error_msg = str(exception)
-        # aioiceの内部エラーを無視
+        error_type = type(exception).__name__
+        
+        # aioice/aiortcの内部エラーを無視
         if (
             "call_exception_handler" in error_msg
             or "is_alive" in error_msg
             or "sendto" in error_msg
             or "NoneType" in error_msg
-            or "AttributeError" in type(exception).__name__
+            or "AttributeError" in error_type
+            or "aioice" in error_msg.lower()
+            or "aiortc" in error_msg.lower()
+            or "Transaction.__retry" in error_msg
+            or "Fatal write error" in error_msg
         ):
             # エラーを無視（ログに出力しない）
             return
+    
+    # メッセージからもチェック
+    if message:
+        if (
+            "call_exception_handler" in message
+            or "is_alive" in message
+            or "sendto" in message
+            or "aioice" in message.lower()
+            or "aiortc" in message.lower()
+        ):
+            return
 
-    # その他のエラーは標準のハンドラーに渡す
-    loop.default_exception_handler(context)
+    # その他のエラーは標準のハンドラーに渡す（loopが存在する場合のみ）
+    if loop and hasattr(loop, "default_exception_handler"):
+        try:
+            loop.default_exception_handler(context)
+        except Exception:
+            # デフォルトハンドラーも失敗する場合は無視
+            pass
 
 
 # 現在のイベントループに例外ハンドラーを設定
@@ -47,8 +71,11 @@ try:
     if loop and not hasattr(loop, "_aioice_handler_set"):
         loop.set_exception_handler(suppress_aioice_errors)
         loop._aioice_handler_set = True
+except RuntimeError:
+    # イベントループが存在しない場合は無視
+    pass
 except Exception:
-    # イベントループが取得できない場合は無視
+    # その他の例外も無視
     pass
 
 # セッション状態の初期化
@@ -294,37 +321,34 @@ elif st.session_state["current_step"] == 2:
 
     with left2:
         st.write("**② 録画コントロール**")
-        try:
-            # STUN/TURNサーバーの設定（複数のSTUNサーバーを使用）
-            # Streamlit Cloud環境では、TURNサーバーが必要な場合があります
-            rtc_configuration = RTCConfiguration(
-                {
-                    "iceServers": [
-                        {"urls": ["stun:stun.l.google.com:19302"]},
-                        {"urls": ["stun:stun1.l.google.com:19302"]},
-                        {"urls": ["stun:stun2.l.google.com:19302"]},
-                        # 無料のTURNサーバー（制限あり、接続が確立されない場合に使用）
-                        # 注意: 無料TURNサーバーは信頼性が低い場合があります
-                        # {
-                        #     "urls": "turn:openrelay.metered.ca:80",
-                        #     "username": "openrelayproject",
-                        #     "credential": "openrelayproject"
-                        # },
-                    ]
-                }
-            )
+        # STUN/TURNサーバーの設定（複数のSTUNサーバーを使用）
+        # Streamlit Cloud環境では、TURNサーバーが必要な場合があります
+        rtc_configuration = RTCConfiguration(
+            {
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                    {"urls": ["stun:stun2.l.google.com:19302"]},
+                    # 無料のTURNサーバー（制限あり、接続が確立されない場合に使用）
+                    # 注意: 無料TURNサーバーは信頼性が低い場合があります
+                    # {
+                    #     "urls": "turn:openrelay.metered.ca:80",
+                    #     "username": "openrelayproject",
+                    #     "credential": "openrelayproject"
+                    # },
+                ]
+            }
+        )
 
-            ctx = webrtc_streamer(
-                key="recorder",
-                mode=WebRtcMode.SENDRECV,
-                media_stream_constraints={"video": True, "audio": True},
-                in_recorder_factory=in_recorder_factory,
-                async_processing=True,
-                rtc_configuration=rtc_configuration,
-            )
-        except Exception as e:
-            st.error(f"WebRTC初期化エラー: {e}")
-            ctx = None
+        # webrtc_streamerの初期化（エラーは例外ハンドラーで抑制される）
+        ctx = webrtc_streamer(
+            key="recorder",
+            mode=WebRtcMode.SENDRECV,
+            media_stream_constraints={"video": True, "audio": True},
+            in_recorder_factory=in_recorder_factory,
+            async_processing=True,
+            rtc_configuration=rtc_configuration,
+        )
 
         if ctx and ctx.state.playing and not st.session_state["was_playing"]:
             st.session_state["was_playing"] = True
