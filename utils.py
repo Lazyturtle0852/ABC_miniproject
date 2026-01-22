@@ -15,8 +15,39 @@ from services.database import (
 
 def init_session_state():
     """セッション状態の初期化"""
-    if "emotion_coords" not in st.session_state:
-        st.session_state["emotion_coords"] = (0.0, 0.0)  # (x, y) tuple
+    if "emotion_params" not in st.session_state:
+        # 既存のemotion_coordsを新しい形式に変換（後方互換性）
+        if "emotion_coords" in st.session_state:
+            old_coords = st.session_state["emotion_coords"]
+            if isinstance(old_coords, (tuple, list)) and len(old_coords) >= 2:
+                st.session_state["emotion_params"] = {
+                    "pleasure": float(old_coords[0]),
+                    "arousal": float(old_coords[1]),
+                    "confidence": 0.0,
+                    "energy": 0.0,
+                    "productivity": 0.0,
+                    "redo_today": 0.0,
+                }
+                # 古いキーを削除
+                del st.session_state["emotion_coords"]
+            else:
+                st.session_state["emotion_params"] = {
+                    "pleasure": 0.0,
+                    "arousal": 0.0,
+                    "confidence": 0.0,
+                    "energy": 0.0,
+                    "productivity": 0.0,
+                    "redo_today": 0.0,
+                }
+        else:
+            st.session_state["emotion_params"] = {
+                "pleasure": 0.0,
+                "arousal": 0.0,
+                "confidence": 0.0,
+                "energy": 0.0,
+                "productivity": 0.0,
+                "redo_today": 0.0,
+            }
 
     if "is_recording" not in st.session_state:
         st.session_state["is_recording"] = False

@@ -4,7 +4,6 @@ import os
 import tempfile
 import asyncio
 import streamlit as st
-import plotly.graph_objects as go
 from datetime import datetime
 from aiortc.contrib.media import MediaRecorder
 from streamlit_webrtc import WebRtcMode, webrtc_streamer, RTCConfiguration
@@ -146,159 +145,80 @@ st.markdown("---")
 # ============================
 if st.session_state["current_step"] == 1:
     st.subheader("ステップ1: 🎭 感情入力")
-    st.markdown("今の気持ちを2次元の感情プロットで入力してください。")
+    st.markdown("今の気持ちを6つのパラメータで入力してください。")
 
-    left, right = st.columns([1, 1], gap="large")
+    # セッション状態から感情パラメータを取得（デフォルト値付き）
+    emotion_params = st.session_state.get("emotion_params", {
+        "pleasure": 0.0,
+        "arousal": 0.0,
+        "confidence": 0.0,
+        "energy": 0.0,
+        "productivity": 0.0,
+        "redo_today": 0.0,
+    })
 
-    with left:
-        st.write("**① 今の感情を入力（2D）**")
+    st.write("**① 今の感情を入力**")
 
-        x = st.slider(
-            "X軸：不快 ← 0 → 快",
-            min_value=-1.0,
-            max_value=1.0,
-            value=float(st.session_state["emotion_coords"][0]),
-            step=0.01,
-        )
-        y = st.slider(
-            "Y軸：非覚醒（落ち着き） ← 0 → 覚醒",
-            min_value=-1.0,
-            max_value=1.0,
-            value=float(st.session_state["emotion_coords"][1]),
-            step=0.01,
-        )
+    pleasure = st.slider(
+        "快不快：不快 ← 0 → 快",
+        min_value=-1.0,
+        max_value=1.0,
+        value=float(emotion_params.get("pleasure", 0.0)),
+        step=0.01,
+    )
 
-        if st.button("この座標で決定 / 次へ進む", type="primary", use_container_width=True):
-            st.session_state["emotion_coords"] = (float(x), float(y))
-            st.session_state["current_step"] = 2
-            st.success(f"保存しました: {st.session_state['emotion_coords']}")
-            st.rerun()
+    arousal = st.slider(
+        "覚醒非覚醒：非覚醒（落ち着き） ← 0 → 覚醒",
+        min_value=-1.0,
+        max_value=1.0,
+        value=float(emotion_params.get("arousal", 0.0)),
+        step=0.01,
+    )
 
-    with right:
-        st.write("**感情プロット（可視化・クリックで移動）**")
+    confidence = st.slider(
+        "自信/不安：不安 ← 0 → 自信",
+        min_value=-1.0,
+        max_value=1.0,
+        value=float(emotion_params.get("confidence", 0.0)),
+        step=0.01,
+    )
 
-        # Plotlyグラフ作成
-        fig = go.Figure()
+    energy = st.slider(
+        "エネルギー/疲労：疲労 ← 0 → エネルギー",
+        min_value=-1.0,
+        max_value=1.0,
+        value=float(emotion_params.get("energy", 0.0)),
+        step=0.01,
+    )
 
-        # 背景グリッド
-        for i in range(-1, 2):
-            if i != 0:
-                fig.add_hline(
-                    y=i * 0.5,
-                    line_width=0.5,
-                    line_color="lightgray",
-                    line_dash="dot",
-                    opacity=0.3,
-                )
-                fig.add_vline(
-                    x=i * 0.5,
-                    line_width=0.5,
-                    line_color="lightgray",
-                    line_dash="dot",
-                    opacity=0.3,
-                )
+    productivity = st.slider(
+        "生産性：低 ← 0 → 高",
+        min_value=-1.0,
+        max_value=1.0,
+        value=float(emotion_params.get("productivity", 0.0)),
+        step=0.01,
+    )
 
-        fig.add_hline(y=0, line_width=2, line_color="black", opacity=0.5)
-        fig.add_vline(x=0, line_width=2, line_color="black", opacity=0.5)
+    redo_today = st.slider(
+        "今日をやり直したいか：やり直したい ← 0 → やり直したくない",
+        min_value=-1.0,
+        max_value=1.0,
+        value=float(emotion_params.get("redo_today", 0.0)),
+        step=0.01,
+    )
 
-        # 現在の点
-        fig.add_trace(
-            go.Scatter(
-                x=[x],
-                y=[y],
-                mode="markers",
-                marker=dict(size=20, color="red", line=dict(width=3, color="darkred")),
-                showlegend=False,
-                hovertemplate="<b>現在の座標</b><br>X: %{x:.2f}<br>Y: %{y:.2f}<extra></extra>",
-            )
-        )
-
-        # 保存済みの点
-        saved_x, saved_y = st.session_state["emotion_coords"]
-        if abs(saved_x - x) > 0.01 or abs(saved_y - y) > 0.01:
-            fig.add_trace(
-                go.Scatter(
-                    x=[saved_x],
-                    y=[saved_y],
-                    mode="markers",
-                    marker=dict(
-                        size=15,
-                        color="lightblue",
-                        line=dict(width=2, color="blue"),
-                        opacity=0.7,
-                        symbol="circle-open",
-                    ),
-                    showlegend=False,
-                    hovertemplate="<b>保存済み座標</b><br>X: %{x:.2f}<br>Y: %{y:.2f}<extra></extra>",
-                )
-            )
-
-        # クリック可能なグリッド
-        grid_step = 0.1
-        grid_x_points = [
-            i * grid_step
-            for i in range(int(-1.0 / grid_step), int(1.0 / grid_step) + 1)
-        ]
-        grid_y_points = [
-            i * grid_step
-            for i in range(int(-1.0 / grid_step), int(1.0 / grid_step) + 1)
-        ]
-        grid_x_all = [gx for gx in grid_x_points for _ in grid_y_points]
-        grid_y_all = [gy for gy in grid_y_points for _ in grid_x_points]
-
-        fig.add_trace(
-            go.Scatter(
-                x=grid_x_all,
-                y=grid_y_all,
-                mode="markers",
-                marker=dict(size=8, opacity=0.01, color="gray"),
-                showlegend=False,
-                hoverinfo="skip",
-            )
-        )
-
-        fig.update_layout(
-            xaxis=dict(
-                range=[-1.1, 1.1], title="Pleasure (不快 ← 0 → 快)", zeroline=False
-            ),
-            yaxis=dict(
-                range=[-1.1, 1.1],
-                title="Arousal (非覚醒 ← 0 → 覚醒)",
-                zeroline=False,
-                scaleanchor="x",
-                scaleratio=1,
-            ),
-            title="Current Emotion Point (グラフ上をクリックして移動)",
-            width=500,
-            height=500,
-            dragmode="select",
-            hovermode="closest",
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-        )
-
-        selection = st.plotly_chart(
-            fig, use_container_width=True, on_select="rerun", key="emotion_plot"
-        )
-
-        if selection and hasattr(selection, "selection") and selection.selection.points:
-            try:
-                for point_data in selection.selection.points:
-                    if len(point_data) >= 2:
-                        clicked_x = max(-1.0, min(1.0, float(point_data[0])))
-                        clicked_y = max(-1.0, min(1.0, float(point_data[1])))
-                        st.session_state["emotion_coords"] = (clicked_x, clicked_y)
-                        st.success(
-                            f"座標を更新しました: ({clicked_x:.2f}, {clicked_y:.2f})"
-                        )
-                        st.rerun()
-                        break
-            except (AttributeError, IndexError, ValueError):
-                pass
-
-        st.info(
-            f"スライダー現在値: (x, y)=({x:.2f}, {y:.2f}) / 保存済み: {st.session_state['emotion_coords']}"
-        )
+    if st.button("この設定で決定 / 次へ進む", type="primary", use_container_width=True):
+        st.session_state["emotion_params"] = {
+            "pleasure": float(pleasure),
+            "arousal": float(arousal),
+            "confidence": float(confidence),
+            "energy": float(energy),
+            "productivity": float(productivity),
+            "redo_today": float(redo_today),
+        }
+        st.session_state["current_step"] = 2
+        st.success("感情パラメータを保存しました。")
+        st.rerun()
 
 # ============================
 # ステップ2: 録画録音
@@ -521,9 +441,17 @@ elif st.session_state["current_step"] == 3:
                 with st.spinner("AI応答を自動生成中..."):
                     try:
                         # バックエンドサービスを呼び出し
+                        emotion_params = st.session_state.get("emotion_params", {
+                            "pleasure": 0.0,
+                            "arousal": 0.0,
+                            "confidence": 0.0,
+                            "energy": 0.0,
+                            "productivity": 0.0,
+                            "redo_today": 0.0,
+                        })
                         ai_response, response_status = generate_ai_response(
                             st.session_state["transcription_result"],
-                            st.session_state["emotion_coords"],
+                            emotion_params,
                             face_emotion=st.session_state.get("face_emotion_result"),
                             client=client,
                         )
@@ -532,11 +460,19 @@ elif st.session_state["current_step"] == 3:
                             st.session_state["ai_response"] = ai_response
 
                             # 対話履歴に追加（データベースにも保存）
+                            emotion_params = st.session_state.get("emotion_params", {
+                                "pleasure": 0.0,
+                                "arousal": 0.0,
+                                "confidence": 0.0,
+                                "energy": 0.0,
+                                "productivity": 0.0,
+                                "redo_today": 0.0,
+                            })
                             conversation_data = {
                                 "transcription": st.session_state[
                                     "transcription_result"
                                 ],
-                                "emotion": st.session_state["emotion_coords"],
+                                "emotion": emotion_params,
                                 "face_emotion": st.session_state.get(
                                     "face_emotion_result"
                                 ),
@@ -577,7 +513,21 @@ elif st.session_state["current_step"] == 3:
             with st.expander(
                 f"対話 {len(st.session_state['conversation_history']) - i} - {conv.get('timestamp', '')[:10]}"
             ):
-                st.write(f"**感情座標:** {conv['emotion']}")
+                emotion = conv.get("emotion", {})
+                # 後方互換性: タプル形式の場合は表示
+                if isinstance(emotion, (tuple, list)):
+                    st.write(f"**感情パラメータ:** 快不快={emotion[0]:.2f}, 覚醒非覚醒={emotion[1]:.2f} (旧形式)")
+                elif isinstance(emotion, dict):
+                    st.write("**感情パラメータ:**")
+                    st.write(f"- 快不快: {emotion.get('pleasure', 0.0):.2f}")
+                    st.write(f"- 覚醒非覚醒: {emotion.get('arousal', 0.0):.2f}")
+                    st.write(f"- 自信/不安: {emotion.get('confidence', 0.0):.2f}")
+                    st.write(f"- エネルギー/疲労: {emotion.get('energy', 0.0):.2f}")
+                    st.write(f"- 生産性: {emotion.get('productivity', 0.0):.2f}")
+                    st.write(f"- 今日をやり直したいか: {emotion.get('redo_today', 0.0):.2f}")
+                else:
+                    st.write(f"**感情パラメータ:** {emotion}")
+                
                 if conv.get("face_emotion"):
                     face_info = conv["face_emotion"]
                     dominant = face_info.get("dominant_emotion", "unknown")

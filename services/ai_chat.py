@@ -5,7 +5,7 @@ from openai import OpenAI
 
 def generate_ai_response(
     transcription_text: str,
-    emotion_coords: tuple[float, float],
+    emotion_params: dict | tuple[float, float],
     face_emotion: dict | None = None,
     client: OpenAI | None = None,
 ) -> tuple[str, str]:
@@ -17,7 +17,9 @@ def generate_ai_response(
 
     Args:
         transcription_text: 文字起こし結果のテキスト（空文字列不可）
-        emotion_coords: 感情座標タプル (x, y)。x, y は -1.0 ～ 1.0
+        emotion_params: 感情パラメータ辞書またはタプル（後方互換性のため）
+            - 辞書形式: {"pleasure": float, "arousal": float, "confidence": float, "energy": float, "productivity": float, "redo_today": float}
+            - タプル形式: (pleasure, arousal) - 後方互換性のため
         face_emotion: 顔感情分析結果（オプション、将来実装用、現在はNone）
         client: OpenAIクライアントインスタンス（Noneの場合は内部で取得を試みる）
 
@@ -28,8 +30,6 @@ def generate_ai_response(
 
     Raises:
         Exception: 重大なエラーが発生した場合（UI層でキャッチする想定）
-
-    TODO: B担当が実装してください
     """
     if not transcription_text:
         return "", "error"
@@ -37,26 +37,62 @@ def generate_ai_response(
     if client is None:
         return "", "error"
 
-    x, y = emotion_coords
-
-    # 感情の説明を生成
-    if x > 0.5:
-        pleasure_desc = "非常に快"
-    elif x > 0:
-        pleasure_desc = "やや快"
-    elif x > -0.5:
-        pleasure_desc = "やや不快"
+    # 後方互換性: タプル形式の場合は辞書に変換
+    if isinstance(emotion_params, (tuple, list)):
+        if len(emotion_params) >= 2:
+            emotion_dict = {
+                "pleasure": float(emotion_params[0]),
+                "arousal": float(emotion_params[1]),
+                "confidence": 0.0,
+                "energy": 0.0,
+                "productivity": 0.0,
+                "redo_today": 0.0,
+            }
+        else:
+            emotion_dict = {
+                "pleasure": 0.0,
+                "arousal": 0.0,
+                "confidence": 0.0,
+                "energy": 0.0,
+                "productivity": 0.0,
+                "redo_today": 0.0,
+            }
+    elif isinstance(emotion_params, dict):
+        emotion_dict = {
+            "pleasure": float(emotion_params.get("pleasure", 0.0)),
+            "arousal": float(emotion_params.get("arousal", 0.0)),
+            "confidence": float(emotion_params.get("confidence", 0.0)),
+            "energy": float(emotion_params.get("energy", 0.0)),
+            "productivity": float(emotion_params.get("productivity", 0.0)),
+            "redo_today": float(emotion_params.get("redo_today", 0.0)),
+        }
     else:
-        pleasure_desc = "非常に不快"
+        emotion_dict = {
+            "pleasure": 0.0,
+            "arousal": 0.0,
+            "confidence": 0.0,
+            "energy": 0.0,
+            "productivity": 0.0,
+            "redo_today": 0.0,
+        }
 
-    if y > 0.5:
-        arousal_desc = "非常に覚醒"
-    elif y > 0:
-        arousal_desc = "やや覚醒"
-    elif y > -0.5:
-        arousal_desc = "やや落ち着き"
-    else:
-        arousal_desc = "非常に落ち着き"
+    def get_emotion_description(value: float, positive_labels: tuple[str, str], negative_labels: tuple[str, str]) -> str:
+        """感情値から説明文を生成"""
+        if value > 0.5:
+            return f"非常に{positive_labels[0]}"
+        elif value > 0:
+            return f"やや{positive_labels[1]}"
+        elif value > -0.5:
+            return f"やや{negative_labels[1]}"
+        else:
+            return f"非常に{negative_labels[0]}"
+
+    pleasure_desc = get_emotion_description(emotion_dict["pleasure"], ("快", "快"), ("不快", "不快"))
+    arousal_desc = get_emotion_description(emotion_dict["arousal"], ("覚醒", "覚醒"), ("落ち着き", "落ち着き"))
+    confidence_desc = get_emotion_description(emotion_dict["confidence"], ("自信", "自信"), ("不安", "不安"))
+    energy_desc = get_emotion_description(emotion_dict["energy"], ("エネルギー", "エネルギー"), ("疲労", "疲労"))
+    productivity_desc = get_emotion_description(emotion_dict["productivity"], ("高", "高"), ("低", "低"))
+    redo_desc = get_emotion_description(emotion_dict["redo_today"], ("やり直したくない", "やり直したくない"), ("やり直したい", "やり直したい"))
 
     system_prompt = """あなたはメンタルヘルスケアの専門家です。
 ユーザーの感情状態を理解し、共感的でサポート的な対話を行ってください。
@@ -66,8 +102,12 @@ def generate_ai_response(
 「{transcription_text}」
 
 ユーザーの現在の感情状態：
-- 快/不快軸（X軸）: {x:.2f} ({pleasure_desc})
-- 覚醒/落ち着き軸（Y軸）: {y:.2f} ({arousal_desc})"""
+- 快/不快軸: {emotion_dict['pleasure']:.2f} ({pleasure_desc})
+- 覚醒/落ち着き軸: {emotion_dict['arousal']:.2f} ({arousal_desc})
+- 自信/不安軸: {emotion_dict['confidence']:.2f} ({confidence_desc})
+- エネルギー/疲労軸: {emotion_dict['energy']:.2f} ({energy_desc})
+- 生産性: {emotion_dict['productivity']:.2f} ({productivity_desc})
+- 今日をやり直したいか: {emotion_dict['redo_today']:.2f} ({redo_desc})"""
 
     # 表情データがある場合は追加
     if face_emotion:
